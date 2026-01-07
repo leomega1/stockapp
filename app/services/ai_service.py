@@ -1,0 +1,223 @@
+from anthropic import Anthropic
+from sqlalchemy.orm import Session
+from datetime import datetime
+from typing import Dict
+import logging
+
+from app.models import Article, Stock
+from app.services.news_service import get_news_summary_for_article
+from app.config import get_settings
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+settings = get_settings()
+
+
+def generate_article_with_claude(
+    symbol: str,
+    company_name: str,
+    price_change_pct: float,
+    price: float,
+    volume: int,
+    news_summary: str,
+    movement_type: str
+) -> Dict[str, str]:
+    """
+    Generate an article explaining stock movement using Claude API
+    
+    Args:
+        symbol: Stock ticker symbol
+        company_name: Company name
+        price_change_pct: Percentage change in price
+        price: Current stock price
+        volume: Trading volume
+        news_summary: Summary of recent news
+        movement_type: "winner" or "loser"
+    
+    Returns:
+        Dictionary with title and content
+    """
+    if not settings.anthropic_api_key:
+        logger.warning("ANTHROPIC_API_KEY not set, using fallback article generation")
+        return generate_fallback_article(
+            symbol, company_name, price_change_pct, price, volume, news_summary, movement_type
+        )
+    
+    try:
+        client = Anthropic(api_key=settings.anthropic_api_key)
+        
+        direction = "up" if price_change_pct > 0 else "down"
+        abs_change = abs(price_change_pct)
+        
+        prompt = f"""Write a concise, informative article (250-300 words) explaining why {company_name} ({symbol}) stock moved {direction} by {abs_change:.2f}% today.
+
+Current Stock Information:
+- Symbol: {symbol}
+- Company: {company_name}
+- Price Change: {price_change_pct:+.2f}%
+- Current Price: ${price:.2f}
+- Trading Volume: {volume:,}
+
+Recent News Headlines:
+{news_summary}
+
+Please write an article that:
+1. Starts with a compelling headline (separate from the article body)
+2. Explains the key factors driving this stock movement
+3. References relevant news or market conditions
+4. Provides context that investors would find useful
+5. Is written in a professional, journalistic style
+6. Is accessible to general investors
+
+Format your response as:
+HEADLINE: [Your headline here]
+
+ARTICLE:
+[Your article text here]"""
+
+        message = client.messages.create(
+            model="claude-3-5-sonnet-20241022",
+            max_tokens=1024,
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
+        )
+        
+        response_text = message.content[0].text
+        
+        # Parse the response
+        parts = response_text.split("ARTICLE:", 1)
+        
+        if len(parts) == 2:
+            headline_part = parts[0].replace("HEADLINE:", "").strip()
+            article_content = parts[1].strip()
+        else:
+            # Fallback parsing
+            lines = response_text.strip().split('\n', 1)
+            headline_part = lines[0].strip()
+            article_content = lines[1].strip() if len(lines) > 1 else response_text
+        
+        logger.info(f"Generated article for {symbol} using Claude API")
+        
+        return {
+            'title': headline_part,
+            'content': article_content
+        }
+        
+    except Exception as e:
+        logger.error(f"Error generating article with Claude for {symbol}: {e}")
+        return generate_fallback_article(
+            symbol, company_name, price_change_pct, price, volume, news_summary, movement_type
+        )
+
+
+def generate_fallback_article(
+    symbol: str,
+    company_name: str,
+    price_change_pct: float,
+    price: float,
+    volume: int,
+    news_summary: str,
+    movement_type: str
+) -> Dict[str, str]:
+    """
+    Generate a basic article without AI when API is not available
+    """
+    direction = "soars" if price_change_pct > 5 else "rises" if price_change_pct > 0 else "plunges" if price_change_pct < -5 else "falls"
+    abs_change = abs(price_change_pct)
+    
+    title = f"{company_name} ({symbol}) {direction} {abs_change:.2f}% in Today's Trading"
+    
+    content = f"""{company_name} ({symbol}) experienced significant movement in today's trading session, with shares {"gaining" if price_change_pct > 0 else "losing"} {abs_change:.2f}% to close at ${price:.2f}.
+
+The stock saw notable trading volume of {volume:,} shares, indicating {"strong buying interest" if price_change_pct > 0 else "heavy selling pressure"} from investors.
+
+Recent News Context:
+{news_summary}
+
+This price movement places {symbol} among the {"top performers" if movement_type == "winner" else "biggest decliners"} in the S&P 500 index for the day. {"Investors appear to be responding positively to recent developments" if price_change_pct > 0 else "Market concerns have weighed on the stock's performance"}.
+
+Traders and investors should monitor upcoming earnings reports, industry trends, and broader market conditions that may continue to influence {company_name}'s stock performance in the coming sessions."""
+    
+    return {
+        'title': title,
+        'content': content
+    }
+
+
+def create_article_for_stock(db: Session, stock: Stock, movement_type: str) -> Article:
+    """
+    Create and store an AI-generated article for a stock
+    
+    Args:
+        db: Database session
+        stock: Stock object
+        movement_type: "winner" or "loser"
+    
+    Returns:
+        Article object
+    """
+    logger.info(f"Generating article for {stock.symbol} ({movement_type})")
+    
+    # Get news summary
+    news_summary = get_news_summary_for_article(db, stock.symbol)
+    
+    # Generate article using Claude
+    article_data = generate_article_with_claude(
+        symbol=stock.symbol,
+        company_name=stock.name,
+        price_change_pct=stock.price_change_pct,
+        price=stock.price,
+        volume=stock.volume,
+        news_summary=news_summary,
+        movement_type=movement_type
+    )
+    
+    # Create and save article
+    article = Article(
+        stock_symbol=stock.symbol,
+        date=stock.date,
+        title=article_data['title'],
+        content=article_data['content'],
+        movement_type=movement_type
+    )
+    
+    db.add(article)
+    db.commit()
+    db.refresh(article)
+    
+    logger.info(f"Saved article for {stock.symbol}: {article.title}")
+    
+    return article
+
+
+def generate_articles_for_movers(db: Session, winners: list, losers: list):
+    """
+    Generate articles for all winners and losers
+    
+    Args:
+        db: Database session
+        winners: List of Stock objects (winners)
+        losers: List of Stock objects (losers)
+    """
+    logger.info("Generating articles for daily movers...")
+    
+    articles_created = 0
+    
+    for stock in winners:
+        try:
+            create_article_for_stock(db, stock, "winner")
+            articles_created += 1
+        except Exception as e:
+            logger.error(f"Error creating article for winner {stock.symbol}: {e}")
+    
+    for stock in losers:
+        try:
+            create_article_for_stock(db, stock, "loser")
+            articles_created += 1
+        except Exception as e:
+            logger.error(f"Error creating article for loser {stock.symbol}: {e}")
+    
+    logger.info(f"Successfully created {articles_created} articles")
+
