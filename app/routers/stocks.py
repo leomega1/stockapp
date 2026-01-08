@@ -121,6 +121,26 @@ async def get_stock_by_symbol(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/trending")
+async def get_trending_stocks():
+    """
+    Get trending stocks from WSB and Twitter
+    """
+    try:
+        from app.services.trending_service import get_combined_trending_tickers
+        
+        trending = get_combined_trending_tickers(limit=15)
+        
+        return {
+            "success": True,
+            "count": len(trending),
+            "trending": trending,
+            "sources": ["reddit/wsb", "twitter/x"]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/add-test-data")
 async def add_test_data(
     db: Session = Depends(get_db)

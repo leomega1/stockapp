@@ -105,7 +105,7 @@ def fetch_stock_data(ticker: str) -> Dict:
 
 def get_daily_movers(db: Session, top_n: int = 5) -> Tuple[List[Stock], List[Stock]]:
     """
-    Fetch and analyze S&P 500 stocks to find biggest winners and losers
+    Fetch and analyze TRENDING stocks from WSB & Twitter to find biggest movers
     
     Args:
         db: Database session
@@ -114,25 +114,34 @@ def get_daily_movers(db: Session, top_n: int = 5) -> Tuple[List[Stock], List[Sto
     Returns:
         Tuple of (winners, losers) as Stock objects
     """
-    logger.info("Starting daily movers analysis...")
+    logger.info("Starting TRENDING stocks analysis (WSB + Twitter)...")
     
-    tickers = get_sp500_tickers()
+    # Get trending tickers from social media instead of S&P 500
+    from app.services.trending_service import get_combined_trending_tickers
     
-    # Alpha Vantage free tier: 5 calls/minute, 500 calls/day
-    # For demo, we'll fetch 10 stocks (takes ~2 minutes)
-    tickers = tickers[:10]
-    logger.info(f"Fetching data for {len(tickers)} stocks (Alpha Vantage rate limit: 5/min)...")
+    trending = get_combined_trending_tickers(limit=20)
+    tickers = [t['ticker'] for t in trending]
+    
+    logger.info(f"🔥 Fetching data for {len(tickers)} TRENDING stocks...")
+    logger.info(f"Top trending: {', '.join(tickers[:10])}")
     
     stock_data = []
+    social_data = {t['ticker']: t for t in trending}
     
     # Fetch data for all tickers (with progress logging)
     for i, ticker in enumerate(tickers):
-        logger.info(f"Fetching {i+1}/{len(tickers)}: {ticker}...")
+        if i % 5 == 0:
+            logger.info(f"Fetched {i}/{len(tickers)} stocks...")
         
         data = fetch_stock_data(ticker)
         if data:
+            # Add social media data
+            if ticker in social_data:
+                data['wsb_mentions'] = social_data[ticker].get('wsb_mentions', 0)
+                data['twitter_mentions'] = social_data[ticker].get('twitter_mentions', 0)
+                data['sentiment'] = social_data[ticker].get('sentiment', 'neutral')
+                data['sentiment_score'] = social_data[ticker].get('sentiment_score', 0)
             stock_data.append(data)
-            logger.info(f"✓ {ticker}: {data['price_change_pct']:+.2f}%")
     
     logger.info(f"Successfully fetched data for {len(stock_data)} out of {len(tickers)} stocks")
     
@@ -152,16 +161,16 @@ def get_daily_movers(db: Session, top_n: int = 5) -> Tuple[List[Stock], List[Sto
     losers = []
     
     for data in winners_data:
-        stock = Stock(**data)
+        stock = Stock(**{k: v for k, v in data.items() if k in ['symbol', 'name', 'price', 'price_change', 'price_change_pct', 'volume', 'date']})
         db.add(stock)
         winners.append(stock)
-        logger.info(f"Winner: {data['symbol']} ({data['name']}) +{data['price_change_pct']:.2f}%")
+        logger.info(f"🚀 Winner: {data['symbol']} ({data['name']}) +{data['price_change_pct']:.2f}% | WSB: {data.get('wsb_mentions', 0)} mentions")
     
     for data in losers_data:
-        stock = Stock(**data)
+        stock = Stock(**{k: v for k, v in data.items() if k in ['symbol', 'name', 'price', 'price_change', 'price_change_pct', 'volume', 'date']})
         db.add(stock)
         losers.append(stock)
-        logger.info(f"Loser: {data['symbol']} ({data['name']}) {data['price_change_pct']:.2f}%")
+        logger.info(f"📉 Loser: {data['symbol']} ({data['name']}) {data['price_change_pct']:.2f}% | WSB: {data.get('wsb_mentions', 0)} mentions")
     
     db.commit()
     
