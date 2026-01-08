@@ -5,6 +5,7 @@ from functools import lru_cache
 class Settings(BaseSettings):
     database_url: str = "sqlite:///./stockapp.db"
     anthropic_api_key: str = ""
+    fmp_api_key: str = ""
     news_api_key: str = ""
     scheduler_enabled: bool = True
     environment: str = "development"

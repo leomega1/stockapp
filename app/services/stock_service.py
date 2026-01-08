@@ -1,111 +1,95 @@
-import yfinance as yf
+import requests
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from typing import List, Dict, Tuple
 import logging
-import requests
-from bs4 import BeautifulSoup
+import os
 
 from app.models import Stock
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Financial Modeling Prep API
+FMP_API_KEY = os.getenv('FMP_API_KEY', '')
+FMP_BASE_URL = 'https://financialmodelingprep.com/api/v3'
+
 
 def get_sp500_tickers() -> List[str]:
     """
-    Fetch S&P 500 ticker symbols from Wikipedia
+    Fetch S&P 500 ticker symbols from FMP API
     """
     try:
-        # Try to fetch from Wikipedia without pandas
-        url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
+        url = f'{FMP_BASE_URL}/sp500_constituent?apikey={FMP_API_KEY}'
         response = requests.get(url, timeout=10)
         response.raise_for_status()
         
-        # Parse HTML
-        soup = BeautifulSoup(response.content, 'html.parser')
-        table = soup.find('table', {'id': 'constituents'})
+        data = response.json()
+        tickers = [item['symbol'] for item in data]
         
-        if table:
-            tickers = []
-            rows = table.find_all('tr')[1:]  # Skip header
-            for row in rows:
-                cols = row.find_all('td')
-                if cols:
-                    ticker = cols[0].text.strip()
-                    # Replace dots with dashes for Yahoo Finance compatibility
-                    ticker = ticker.replace('.', '-')
-                    tickers.append(ticker)
-            
-            if tickers:
-                logger.info(f"Fetched {len(tickers)} S&P 500 tickers from Wikipedia")
-                return tickers
+        if tickers:
+            logger.info(f"Fetched {len(tickers)} S&P 500 tickers from FMP")
+            return tickers
     except Exception as e:
-        logger.error(f"Error fetching S&P 500 tickers from Wikipedia: {e}")
+        logger.error(f"Error fetching S&P 500 tickers from FMP: {e}")
     
-    # Return expanded fallback list with more stocks
+    # Fallback list
     logger.warning("Using fallback ticker list")
-    return ['AAPL', 'MSFT', 'GOOGL', 'GOOG', 'AMZN', 'NVDA', 'META', 'TSLA', 'BRK-B', 
+    return ['AAPL', 'MSFT', 'GOOGL', 'GOOG', 'AMZN', 'NVDA', 'META', 'TSLA', 'BRK.B', 
             'UNH', 'JNJ', 'JPM', 'V', 'PG', 'XOM', 'HD', 'CVX', 'MA', 'BAC',
             'ABBV', 'PFE', 'COST', 'KO', 'AVGO', 'MRK', 'PEP', 'TMO', 'WMT',
             'CSCO', 'MCD', 'ABT', 'DHR', 'ACN', 'LIN', 'VZ', 'ADBE', 'NKE',
             'CRM', 'TXN', 'NEE', 'CMCSA', 'PM', 'DIS', 'ORCL', 'WFC', 'UPS',
-            'INTC', 'AMD', 'QCOM', 'NFLX', 'HON', 'RTX', 'IBM', 'SPGI', 'INTU',
-            'AMGN', 'CAT', 'GE', 'SBUX', 'AXP', 'NOW', 'TJX', 'BKNG', 'LOW',
-            'BLK', 'DE', 'MDLZ', 'GILD', 'SYK', 'MMC', 'ADP', 'CI', 'VRTX',
-            'AMT', 'ISRG', 'PLD', 'MO', 'CVS', 'C', 'LRCX', 'ZTS', 'SCHW',
-            'CB', 'REGN', 'ETN', 'ADI', 'SO', 'FI', 'DUK', 'BSX', 'TMUS',
-            'SLB', 'EOG', 'MMM', 'PNC', 'EQIX', 'HCA', 'USB', 'APD', 'CCI',
-            'NSC', 'ICE', 'MCO', 'CL', 'EMR', 'GM', 'GD', 'WM', 'PSX', 'F',
-            'KLAC', 'ITW', 'ANET', 'PYPL', 'AON', 'TGT', 'MSI', 'SHW', 'CARR']
+            'INTC', 'AMD', 'QCOM']
 
 
-def fetch_stock_data(ticker: str, period: str = "5d") -> Dict:
+def fetch_stock_data(ticker: str) -> Dict:
     """
-    Fetch stock data for a single ticker
+    Fetch stock data for a single ticker using FMP API
     
     Args:
         ticker: Stock ticker symbol
-        period: Time period (1d, 5d, 1mo, etc.)
     
     Returns:
         Dictionary with stock data
     """
     try:
-        # Add user agent to avoid blocking
-        import time
-        time.sleep(0.1)  # Small delay to avoid rate limiting
+        # Get historical prices (last 5 days)
+        url = f'{FMP_BASE_URL}/historical-price-full/{ticker}?apikey={FMP_API_KEY}'
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
         
-        stock = yf.Ticker(ticker)
-        hist = stock.history(period=period)
+        data = response.json()
         
-        if hist.empty or len(hist) < 2:
-            logger.warning(f"No historical data for {ticker}")
+        if 'historical' not in data or len(data['historical']) < 2:
+            logger.warning(f"Insufficient data for {ticker}")
             return None
-            
-        # Get the latest and previous day's data
-        latest = hist.iloc[-1]
-        previous = hist.iloc[-2]
         
-        price_change = latest['Close'] - previous['Close']
-        price_change_pct = (price_change / previous['Close']) * 100
+        # Get latest and previous day
+        historical = data['historical']
+        latest = historical[0]
+        previous = historical[1]
         
-        # Get company info (with error handling)
+        price_change = latest['close'] - previous['close']
+        price_change_pct = (price_change / previous['close']) * 100
+        
+        # Get company profile for name
+        profile_url = f'{FMP_BASE_URL}/profile/{ticker}?apikey={FMP_API_KEY}'
         try:
-            info = stock.info
-            company_name = info.get('longName', info.get('shortName', ticker))
-        except Exception as e:
-            logger.warning(f"Could not fetch info for {ticker}: {e}")
+            profile_response = requests.get(profile_url, timeout=5)
+            profile_data = profile_response.json()
+            company_name = profile_data[0]['companyName'] if profile_data else ticker
+        except:
             company_name = ticker
         
         return {
             'symbol': ticker,
             'name': company_name,
-            'price': float(latest['Close']),
+            'price': float(latest['close']),
             'price_change': float(price_change),
             'price_change_pct': float(price_change_pct),
-            'volume': int(latest['Volume']),
-            'date': latest.name.to_pydatetime()
+            'volume': int(latest['volume']),
+            'date': datetime.strptime(latest['date'], '%Y-%m-%d')
         }
     except Exception as e:
         logger.warning(f"Error fetching data for {ticker}: {str(e)[:100]}")
