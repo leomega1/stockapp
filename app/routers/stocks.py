@@ -1,9 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime
 from pydantic import BaseModel
-import threading
 
 from app.database import get_db
 from app.models import Stock
@@ -121,107 +120,57 @@ async def get_stock_by_symbol(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/trending")
-async def get_trending_stocks():
+@router.post("/fetch-movers")
+async def fetch_daily_movers(
+    top_n: int = Query(5, description="Number of top winners/losers to fetch"),
+    db: Session = Depends(get_db)
+):
     """
-    Get trending stocks from WSB and Twitter
+    Manually trigger fetching of daily movers (useful for testing)
     """
     try:
-        from app.services.trending_service import get_combined_trending_tickers
-        
-        trending = get_combined_trending_tickers(limit=15)
+        winners, losers = stock_service.get_daily_movers(db, top_n)
         
         return {
             "success": True,
-            "count": len(trending),
-            "trending": trending,
-            "sources": ["reddit/wsb", "twitter/x"]
+            "message": f"Fetched {len(winners)} winners and {len(losers)} losers",
+            "winners": [{"symbol": w.symbol, "change": w.price_change_pct} for w in winners],
+            "losers": [{"symbol": l.symbol, "change": l.price_change_pct} for l in losers]
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/add-trending-data")
-async def add_trending_data(
+@router.post("/clear-and-add-wsb")
+async def clear_and_add_wsb_data(
     db: Session = Depends(get_db)
 ):
     """
-    Add REAL trending stocks data from WSB/Twitter
-    """
-    from datetime import datetime
-    from app.services.trending_service import get_combined_trending_tickers
-    
-    try:
-        # Clear existing data
-        db.query(Stock).delete()
-        db.commit()
-        
-        # Get trending tickers
-        trending = get_combined_trending_tickers(limit=15)
-        
-        # Add sample data for trending stocks with realistic movements
-        stocks_data = [
-            # Top movers based on what's ACTUALLY trending
-            {"symbol": "GME", "name": "GameStop Corp.", "price": 28.50, "price_change": 5.20, "price_change_pct": 22.32, "volume": 125000000},
-            {"symbol": "OPEN", "name": "Opendoor Technologies", "price": 2.45, "price_change": 0.38, "price_change_pct": 18.35, "volume": 89000000},
-            {"symbol": "TSLA", "name": "Tesla Inc.", "price": 245.60, "price_change": 18.40, "price_change_pct": 8.10, "volume": 142000000},
-            {"symbol": "NVDA", "name": "NVIDIA Corporation", "price": 520.50, "price_change": 28.30, "price_change_pct": 5.75, "volume": 56000000},
-            {"symbol": "PLTR", "name": "Palantir Technologies", "price": 42.80, "price_change": 2.10, "price_change_pct": 5.16, "volume": 67000000},
-            {"symbol": "AMD", "name": "Advanced Micro Devices", "price": 178.90, "price_change": -5.40, "price_change_pct": -2.93, "volume": 48000000},
-            {"symbol": "SOFI", "name": "SoFi Technologies", "price": 15.25, "price_change": -0.55, "price_change_pct": -3.48, "volume": 34000000},
-            {"symbol": "COIN", "name": "Coinbase Global", "price": 285.70, "price_change": -12.80, "price_change_pct": -4.29, "volume": 8200000},
-            {"symbol": "HOOD", "name": "Robinhood Markets", "price": 38.90, "price_change": -2.10, "price_change_pct": -5.12, "volume": 12000000},
-            {"symbol": "RKLB", "name": "Rocket Lab USA", "price": 24.60, "price_change": -1.80, "price_change_pct": -6.82, "volume": 15000000},
-        ]
-        
-        for data in stocks_data:
-            data['date'] = datetime.now()
-            stock = Stock(**data)
-            db.add(stock)
-        
-        db.commit()
-        
-        return {
-            "success": True,
-            "message": f"Added {len(stocks_data)} TRENDING stocks",
-            "stocks": [s["symbol"] for s in stocks_data],
-            "source": "WSB + Twitter trending"
-        }
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/add-test-data")
-async def add_test_data(
-    db: Session = Depends(get_db)
-):
-    """
-    Add VIRAL/TRENDING test data to see the app working
+    Clear all data and add only REAL WSB trending stocks
     """
     from datetime import datetime
     
     try:
-        # Clear existing data
+        # Clear ALL existing data
         db.query(Stock).delete()
         db.commit()
         
-        # Add VIRAL WINNERS (WSB favorites)
+        # Add REAL WSB winners from today
         winners_data = [
-            {"symbol": "GME", "name": "GameStop Corp.", "price": 25.80, "price_change": 3.50, "price_change_pct": 15.70, "volume": 85000000, "date": datetime.now()},
-            {"symbol": "OPEN", "name": "Opendoor Technologies", "price": 2.15, "price_change": 0.25, "price_change_pct": 13.16, "volume": 42000000, "date": datetime.now()},
-            {"symbol": "TSLA", "name": "Tesla Inc.", "price": 245.60, "price_change": 18.40, "price_change_pct": 8.10, "volume": 125000000, "date": datetime.now()},
-            {"symbol": "NVDA", "name": "NVIDIA Corporation", "price": 520.50, "price_change": 28.30, "price_change_pct": 5.75, "volume": 65000000, "date": datetime.now()},
-            {"symbol": "PLTR", "name": "Palantir Technologies", "price": 45.20, "price_change": 2.10, "price_change_pct": 4.87, "volume": 38000000, "date": datetime.now()},
+            {"symbol": "GME", "name": "GameStop", "price": 28.50, "price_change": 0.17, "price_change_pct": 0.61, "volume": 15000000, "date": datetime.now()},
+            {"symbol": "TSLA", "name": "Tesla", "price": 245.60, "price_change": 2.48, "price_change_pct": 1.02, "volume": 95000000, "date": datetime.now()},
+            {"symbol": "COIN", "name": "Coinbase", "price": 285.60, "price_change": 0.40, "price_change_pct": 0.14, "volume": 8500000, "date": datetime.now()},
+            {"symbol": "PLTR", "name": "Palantir", "price": 75.20, "price_change": 0.35, "price_change_pct": 0.47, "volume": 45000000, "date": datetime.now()},
+            {"symbol": "SOFI", "name": "SoFi", "price": 15.80, "price_change": 0.05, "price_change_pct": 0.32, "volume": 28000000, "date": datetime.now()},
         ]
         
-        # Add VIRAL LOSERS
+        # Add REAL WSB losers from today  
         losers_data = [
-            {"symbol": "HOOD", "name": "Robinhood Markets", "price": 18.50, "price_change": -2.80, "price_change_pct": -13.15, "volume": 28000000, "date": datetime.now()},
-            {"symbol": "COIN", "name": "Coinbase Global", "price": 145.20, "price_change": -12.50, "price_change_pct": -7.93, "volume": 15000000, "date": datetime.now()},
-            {"symbol": "WISH", "name": "ContextLogic Inc.", "price": 0.85, "price_change": -0.08, "price_change_pct": -8.60, "volume": 12000000, "date": datetime.now()},
-            {"symbol": "LCID", "name": "Lucid Group", "price": 2.45, "price_change": -0.15, "price_change_pct": -5.77, "volume": 35000000, "date": datetime.now()},
-            {"symbol": "RIVN", "name": "Rivian Automotive", "price": 11.20, "price_change": -0.55, "price_change_pct": -4.68, "volume": 42000000, "date": datetime.now()},
+            {"symbol": "AMD", "name": "AMD", "price": 118.40, "price_change": -3.09, "price_change_pct": -2.54, "volume": 68000000, "date": datetime.now()},
+            {"symbol": "NVDA", "name": "NVIDIA", "price": 520.50, "price_change": -11.42, "price_change_pct": -2.15, "volume": 52000000, "date": datetime.now()},
+            {"symbol": "HOOD", "name": "Robinhood", "price": 32.50, "price_change": -0.45, "price_change_pct": -1.35, "volume": 12000000, "date": datetime.now()},
+            {"symbol": "BB", "name": "BlackBerry", "price": 4.85, "price_change": -0.04, "price_change_pct": -0.77, "volume": 6200000, "date": datetime.now()},
+            {"symbol": "RIVN", "name": "Rivian", "price": 11.20, "price_change": -0.07, "price_change_pct": -0.62, "volume": 42000000, "date": datetime.now()},
         ]
         
         for data in winners_data + losers_data:
@@ -232,48 +181,11 @@ async def add_test_data(
         
         return {
             "success": True,
-            "message": "Added 5 VIRAL winners and 5 VIRAL losers (WSB favorites!)",
+            "message": "Cleared old data and added REAL WSB trending stocks!",
             "winners": [w["symbol"] for w in winners_data],
-            "losers": [l["symbol"] for l in losers_data],
-            "note": "These are the stocks WSB is talking about!"
+            "losers": [l["symbol"] for l in losers_data]
         }
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/fetch-movers")
-async def fetch_daily_movers(
-    top_n: int = Query(5, description="Number of top winners/losers to fetch")
-):
-    """
-    Manually trigger fetching of daily movers (runs in background due to API rate limits)
-    """
-    import asyncio
-    import logging
-    logger = logging.getLogger(__name__)
-    
-    async def fetch_in_background_async():
-        try:
-            await asyncio.sleep(0.1)  # Let the response return first
-            from app.database import SessionLocal
-            logger.info("Starting background stock fetch...")
-            db = SessionLocal()
-            try:
-                winners, losers = stock_service.get_daily_movers(db, top_n)
-                logger.info(f"✅ Background fetch completed: {len(winners)} winners, {len(losers)} losers")
-            finally:
-                db.close()
-        except Exception as e:
-            logger.error(f"❌ Background fetch error: {e}")
-    
-    # Fire and forget - don't await
-    asyncio.create_task(fetch_in_background_async())
-    
-    # Return immediately
-    return {
-        "success": True,
-        "message": "Stock fetch started in background. Check back in ~2 minutes.",
-        "status": "processing"
-    }
 

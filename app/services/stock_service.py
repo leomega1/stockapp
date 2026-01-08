@@ -1,111 +1,85 @@
-import requests
+import yfinance as yf
+import pandas as pd
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from typing import List, Dict, Tuple
 import logging
-import os
-import time
 
 from app.models import Stock
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Alpha Vantage API
-ALPHA_VANTAGE_API_KEY = os.getenv('ALPHA_VANTAGE_API_KEY', '')
-ALPHA_VANTAGE_BASE_URL = 'https://www.alphavantage.co/query'
-
 
 def get_sp500_tickers() -> List[str]:
     """
-    Get S&P 500 ticker symbols (using a curated list)
+    Fetch S&P 500 ticker symbols from Wikipedia
     """
-    # Alpha Vantage doesn't have an S&P 500 list endpoint, so we use a curated list
-    return ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'BRK.B', 
-            'UNH', 'JNJ', 'JPM', 'V', 'PG', 'XOM', 'HD', 'CVX', 'MA', 'BAC',
-            'ABBV', 'PFE', 'COST', 'KO', 'AVGO', 'MRK', 'PEP', 'TMO', 'WMT',
-            'CSCO', 'MCD', 'ABT', 'DHR', 'ACN', 'LIN', 'VZ', 'ADBE', 'NKE',
-            'CRM', 'TXN', 'NEE', 'CMCSA', 'PM', 'DIS', 'ORCL', 'WFC', 'UPS',
-            'INTC', 'AMD', 'QCOM', 'NFLX', 'HON']
+    try:
+        url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
+        tables = pd.read_html(url)
+        sp500_table = tables[0]
+        tickers = sp500_table['Symbol'].tolist()
+        # Replace dots with dashes for Yahoo Finance compatibility
+        tickers = [ticker.replace('.', '-') for ticker in tickers]
+        logger.info(f"Fetched {len(tickers)} S&P 500 tickers")
+        return tickers
+    except Exception as e:
+        logger.error(f"Error fetching S&P 500 tickers: {e}")
+        # Return a subset of popular tickers as fallback
+        return ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'BRK-B', 
+                'UNH', 'JNJ', 'JPM', 'V', 'PG', 'XOM', 'HD', 'CVX', 'MA', 'BAC',
+                'ABBV', 'PFE', 'COST', 'KO', 'AVGO', 'MRK', 'PEP', 'TMO', 'WMT',
+                'CSCO', 'MCD', 'ABT', 'DHR', 'ACN', 'LIN', 'VZ', 'ADBE', 'NKE',
+                'CRM', 'TXN', 'NEE', 'CMCSA', 'PM', 'DIS', 'ORCL', 'WFC', 'UPS']
 
 
-def fetch_stock_data(ticker: str) -> Dict:
+def fetch_stock_data(ticker: str, period: str = "5d") -> Dict:
     """
-    Fetch stock data for a single ticker using Alpha Vantage API
+    Fetch stock data for a single ticker
     
     Args:
         ticker: Stock ticker symbol
+        period: Time period (1d, 5d, 1mo, etc.)
     
     Returns:
         Dictionary with stock data
     """
     try:
-        # Rate limiting - Alpha Vantage free tier: 5 calls/minute
-        time.sleep(12)  # 12 seconds = 5 calls per minute max
+        stock = yf.Ticker(ticker)
+        hist = stock.history(period=period)
         
-        # Get daily time series
-        params = {
-            'function': 'TIME_SERIES_DAILY',
-            'symbol': ticker,
-            'apikey': ALPHA_VANTAGE_API_KEY,
-            'outputsize': 'compact'
-        }
-        
-        response = requests.get(ALPHA_VANTAGE_BASE_URL, params=params, timeout=15)
-        response.raise_for_status()
-        
-        data = response.json()
-        
-        # Check for API errors
-        if 'Error Message' in data:
-            logger.warning(f"API error for {ticker}: {data['Error Message']}")
-            return None
-        
-        if 'Note' in data:
-            logger.warning(f"Rate limit hit for {ticker}")
+        if len(hist) < 2:
             return None
             
-        if 'Time Series (Daily)' not in data:
-            logger.warning(f"No time series data for {ticker}")
-            return None
+        # Get the latest and previous day's data
+        latest = hist.iloc[-1]
+        previous = hist.iloc[-2]
         
-        time_series = data['Time Series (Daily)']
-        dates = sorted(time_series.keys(), reverse=True)
+        price_change = latest['Close'] - previous['Close']
+        price_change_pct = (price_change / previous['Close']) * 100
         
-        if len(dates) < 2:
-            logger.warning(f"Insufficient data for {ticker}")
-            return None
-        
-        # Get latest and previous day
-        latest_date = dates[0]
-        previous_date = dates[1]
-        
-        latest = time_series[latest_date]
-        previous = time_series[previous_date]
-        
-        latest_close = float(latest['4. close'])
-        previous_close = float(previous['4. close'])
-        
-        price_change = latest_close - previous_close
-        price_change_pct = (price_change / previous_close) * 100
+        # Get company info
+        info = stock.info
+        company_name = info.get('longName', ticker)
         
         return {
             'symbol': ticker,
-            'name': ticker,  # Alpha Vantage free tier doesn't include company names easily
-            'price': latest_close,
-            'price_change': price_change,
-            'price_change_pct': price_change_pct,
-            'volume': int(latest['5. volume']),
-            'date': datetime.strptime(latest_date, '%Y-%m-%d')
+            'name': company_name,
+            'price': float(latest['Close']),
+            'price_change': float(price_change),
+            'price_change_pct': float(price_change_pct),
+            'volume': int(latest['Volume']),
+            'date': latest.name.to_pydatetime()
         }
     except Exception as e:
-        logger.warning(f"Error fetching data for {ticker}: {str(e)[:100]}")
+        logger.error(f"Error fetching data for {ticker}: {e}")
         return None
 
 
 def get_daily_movers(db: Session, top_n: int = 5) -> Tuple[List[Stock], List[Stock]]:
     """
-    Fetch and analyze TRENDING stocks from WSB & Twitter to find biggest movers
+    Fetch and analyze S&P 500 stocks to find biggest winners and losers
     
     Args:
         db: Database session
@@ -114,40 +88,21 @@ def get_daily_movers(db: Session, top_n: int = 5) -> Tuple[List[Stock], List[Sto
     Returns:
         Tuple of (winners, losers) as Stock objects
     """
-    logger.info("Starting TRENDING stocks analysis (WSB + Twitter)...")
+    logger.info("Starting daily movers analysis...")
     
-    # Get trending tickers from social media instead of S&P 500
-    from app.services.trending_service import get_combined_trending_tickers
-    
-    trending = get_combined_trending_tickers(limit=20)
-    tickers = [t['ticker'] for t in trending]
-    
-    logger.info(f"🔥 Fetching data for {len(tickers)} TRENDING stocks...")
-    logger.info(f"Top trending: {', '.join(tickers[:10])}")
-    
+    tickers = get_sp500_tickers()
     stock_data = []
-    social_data = {t['ticker']: t for t in trending}
     
     # Fetch data for all tickers (with progress logging)
     for i, ticker in enumerate(tickers):
-        if i % 5 == 0:
-            logger.info(f"Fetched {i}/{len(tickers)} stocks...")
+        if i % 50 == 0:
+            logger.info(f"Processed {i}/{len(tickers)} stocks...")
         
         data = fetch_stock_data(ticker)
         if data:
-            # Add social media data
-            if ticker in social_data:
-                data['wsb_mentions'] = social_data[ticker].get('wsb_mentions', 0)
-                data['twitter_mentions'] = social_data[ticker].get('twitter_mentions', 0)
-                data['sentiment'] = social_data[ticker].get('sentiment', 'neutral')
-                data['sentiment_score'] = social_data[ticker].get('sentiment_score', 0)
             stock_data.append(data)
     
-    logger.info(f"Successfully fetched data for {len(stock_data)} out of {len(tickers)} stocks")
-    
-    if not stock_data:
-        logger.error("No stock data was fetched!")
-        return [], []
+    logger.info(f"Successfully fetched data for {len(stock_data)} stocks")
     
     # Sort by percentage change
     stock_data.sort(key=lambda x: x['price_change_pct'], reverse=True)
@@ -161,16 +116,16 @@ def get_daily_movers(db: Session, top_n: int = 5) -> Tuple[List[Stock], List[Sto
     losers = []
     
     for data in winners_data:
-        stock = Stock(**{k: v for k, v in data.items() if k in ['symbol', 'name', 'price', 'price_change', 'price_change_pct', 'volume', 'date']})
+        stock = Stock(**data)
         db.add(stock)
         winners.append(stock)
-        logger.info(f"🚀 Winner: {data['symbol']} ({data['name']}) +{data['price_change_pct']:.2f}% | WSB: {data.get('wsb_mentions', 0)} mentions")
+        logger.info(f"Winner: {data['symbol']} ({data['name']}) +{data['price_change_pct']:.2f}%")
     
     for data in losers_data:
-        stock = Stock(**{k: v for k, v in data.items() if k in ['symbol', 'name', 'price', 'price_change', 'price_change_pct', 'volume', 'date']})
+        stock = Stock(**data)
         db.add(stock)
         losers.append(stock)
-        logger.info(f"📉 Loser: {data['symbol']} ({data['name']}) {data['price_change_pct']:.2f}% | WSB: {data.get('wsb_mentions', 0)} mentions")
+        logger.info(f"Loser: {data['symbol']} ({data['name']}) {data['price_change_pct']:.2f}%")
     
     db.commit()
     
