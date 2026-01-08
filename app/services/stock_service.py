@@ -1,14 +1,19 @@
-import yfinance as yf
+import requests
+import time
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from typing import List, Dict, Tuple
 import logging
+import os
 
 from app.models import Stock
 from app.services.trending_service import get_combined_trending_tickers
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Alpha Vantage API key
+ALPHA_VANTAGE_API_KEY = os.getenv("ALPHA_VANTAGE_API_KEY", "340WIPMNM58GMXMZ")
 
 
 def get_trending_tickers() -> List[str]:
@@ -28,42 +33,77 @@ def get_trending_tickers() -> List[str]:
 
 def fetch_stock_data(ticker: str, period: str = "5d") -> Dict:
     """
-    Fetch stock data for a single ticker
+    Fetch stock data for a single ticker using Alpha Vantage API
     
     Args:
         ticker: Stock ticker symbol
-        period: Time period (1d, 5d, 1mo, etc.)
+        period: Not used (kept for compatibility)
     
     Returns:
         Dictionary with stock data
     """
     try:
-        stock = yf.Ticker(ticker)
-        hist = stock.history(period=period)
+        # Alpha Vantage TIME_SERIES_DAILY endpoint
+        url = f"https://www.alphavantage.co/query"
+        params = {
+            "function": "TIME_SERIES_DAILY",
+            "symbol": ticker,
+            "apikey": ALPHA_VANTAGE_API_KEY
+        }
         
-        if len(hist) < 2:
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        # Check for errors
+        if "Error Message" in data:
+            logger.warning(f"Alpha Vantage error for {ticker}: {data['Error Message']}")
+            return None
+        
+        if "Note" in data:
+            logger.warning(f"Alpha Vantage rate limit hit: {data['Note']}")
             return None
             
-        # Get the latest and previous day's data
-        latest = hist.iloc[-1]
-        previous = hist.iloc[-2]
+        if "Time Series (Daily)" not in data:
+            logger.warning(f"No daily data for {ticker}")
+            return None
         
-        price_change = latest['Close'] - previous['Close']
-        price_change_pct = (price_change / previous['Close']) * 100
+        time_series = data["Time Series (Daily)"]
+        dates = sorted(time_series.keys(), reverse=True)
         
-        # Get company info
-        info = stock.info
-        company_name = info.get('longName', ticker)
+        if len(dates) < 2:
+            logger.warning(f"Not enough data for {ticker}")
+            return None
+        
+        # Get latest and previous day
+        latest_date = dates[0]
+        previous_date = dates[1]
+        
+        latest = time_series[latest_date]
+        previous = time_series[previous_date]
+        
+        # Calculate price change
+        close_price = float(latest['4. close'])
+        previous_close = float(previous['4. close'])
+        price_change = close_price - previous_close
+        price_change_pct = (price_change / previous_close) * 100
+        
+        # Get company name (Alpha Vantage doesn't provide it in this endpoint, use ticker)
+        company_name = ticker
         
         return {
             'symbol': ticker,
             'name': company_name,
-            'price': float(latest['Close']),
-            'price_change': float(price_change),
-            'price_change_pct': float(price_change_pct),
-            'volume': int(latest['Volume']),
-            'date': latest.name.to_pydatetime()
+            'price': close_price,
+            'price_change': price_change,
+            'price_change_pct': price_change_pct,
+            'volume': int(latest['5. volume']),
+            'date': datetime.strptime(latest_date, '%Y-%m-%d')
         }
+        
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Network error fetching {ticker}: {e}")
+        return None
     except Exception as e:
         logger.error(f"Error fetching data for {ticker}: {e}")
         return None
@@ -93,7 +133,9 @@ def get_daily_movers(db: Session, top_n: int = 5) -> Tuple[List[Stock], List[Sto
     
     stock_data = []
     
-    # Fetch data for trending tickers
+    # Fetch data for trending tickers (limit to 20 to avoid API limits)
+    tickers = tickers[:20]
+    
     for i, ticker in enumerate(tickers):
         logger.info(f"Fetching {i+1}/{len(tickers)}: {ticker}...")
         
@@ -103,6 +145,11 @@ def get_daily_movers(db: Session, top_n: int = 5) -> Tuple[List[Stock], List[Sto
             logger.info(f"✓ {ticker}: {data['price_change_pct']:+.2f}%")
         else:
             logger.warning(f"✗ Failed to get data for {ticker}")
+        
+        # Alpha Vantage free tier: 5 calls per minute
+        # Add delay to avoid rate limiting
+        if i < len(tickers) - 1:
+            time.sleep(12)  # 60 seconds / 5 calls = 12 seconds per call
     
     logger.info(f"Successfully fetched data for {len(stock_data)} trending stocks")
     
