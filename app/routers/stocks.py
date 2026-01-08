@@ -146,7 +146,7 @@ async def add_test_data(
     db: Session = Depends(get_db)
 ):
     """
-    Add test data to see the app working
+    Add VIRAL/TRENDING test data to see the app working
     """
     from datetime import datetime
     
@@ -155,22 +155,22 @@ async def add_test_data(
         db.query(Stock).delete()
         db.commit()
         
-        # Add winners
+        # Add VIRAL WINNERS (WSB favorites)
         winners_data = [
-            {"symbol": "NVDA", "name": "NVIDIA Corporation", "price": 520.50, "price_change": 15.30, "price_change_pct": 3.03, "volume": 45000000, "date": datetime.now()},
-            {"symbol": "MSFT", "name": "Microsoft Corporation", "price": 380.25, "price_change": 8.50, "price_change_pct": 2.29, "volume": 28000000, "date": datetime.now()},
-            {"symbol": "GOOGL", "name": "Alphabet Inc.", "price": 142.80, "price_change": 3.20, "price_change_pct": 2.29, "volume": 32000000, "date": datetime.now()},
-            {"symbol": "AMZN", "name": "Amazon.com Inc.", "price": 178.90, "price_change": 3.40, "price_change_pct": 1.94, "volume": 41000000, "date": datetime.now()},
-            {"symbol": "TSLA", "name": "Tesla Inc.", "price": 245.60, "price_change": 4.10, "price_change_pct": 1.70, "volume": 95000000, "date": datetime.now()},
+            {"symbol": "GME", "name": "GameStop Corp.", "price": 25.80, "price_change": 3.50, "price_change_pct": 15.70, "volume": 85000000, "date": datetime.now()},
+            {"symbol": "OPEN", "name": "Opendoor Technologies", "price": 2.15, "price_change": 0.25, "price_change_pct": 13.16, "volume": 42000000, "date": datetime.now()},
+            {"symbol": "TSLA", "name": "Tesla Inc.", "price": 245.60, "price_change": 18.40, "price_change_pct": 8.10, "volume": 125000000, "date": datetime.now()},
+            {"symbol": "NVDA", "name": "NVIDIA Corporation", "price": 520.50, "price_change": 28.30, "price_change_pct": 5.75, "volume": 65000000, "date": datetime.now()},
+            {"symbol": "PLTR", "name": "Palantir Technologies", "price": 45.20, "price_change": 2.10, "price_change_pct": 4.87, "volume": 38000000, "date": datetime.now()},
         ]
         
-        # Add losers
+        # Add VIRAL LOSERS
         losers_data = [
-            {"symbol": "AAPL", "name": "Apple Inc.", "price": 185.50, "price_change": -3.80, "price_change_pct": -2.01, "volume": 52000000, "date": datetime.now()},
-            {"symbol": "META", "name": "Meta Platforms Inc.", "price": 485.20, "price_change": -9.50, "price_change_pct": -1.92, "volume": 18000000, "date": datetime.now()},
-            {"symbol": "UNH", "name": "UnitedHealth Group", "price": 520.30, "price_change": -8.70, "price_change_pct": -1.64, "volume": 3500000, "date": datetime.now()},
-            {"symbol": "JNJ", "name": "Johnson & Johnson", "price": 158.90, "price_change": -2.10, "price_change_pct": -1.30, "volume": 7200000, "date": datetime.now()},
-            {"symbol": "JPM", "name": "JPMorgan Chase", "price": 215.40, "price_change": -2.60, "price_change_pct": -1.19, "volume": 11000000, "date": datetime.now()},
+            {"symbol": "HOOD", "name": "Robinhood Markets", "price": 18.50, "price_change": -2.80, "price_change_pct": -13.15, "volume": 28000000, "date": datetime.now()},
+            {"symbol": "COIN", "name": "Coinbase Global", "price": 145.20, "price_change": -12.50, "price_change_pct": -7.93, "volume": 15000000, "date": datetime.now()},
+            {"symbol": "WISH", "name": "ContextLogic Inc.", "price": 0.85, "price_change": -0.08, "price_change_pct": -8.60, "volume": 12000000, "date": datetime.now()},
+            {"symbol": "LCID", "name": "Lucid Group", "price": 2.45, "price_change": -0.15, "price_change_pct": -5.77, "volume": 35000000, "date": datetime.now()},
+            {"symbol": "RIVN", "name": "Rivian Automotive", "price": 11.20, "price_change": -0.55, "price_change_pct": -4.68, "volume": 42000000, "date": datetime.now()},
         ]
         
         for data in winners_data + losers_data:
@@ -181,9 +181,10 @@ async def add_test_data(
         
         return {
             "success": True,
-            "message": "Added 5 winners and 5 losers test data",
+            "message": "Added 5 VIRAL winners and 5 VIRAL losers (WSB favorites!)",
             "winners": [w["symbol"] for w in winners_data],
-            "losers": [l["symbol"] for l in losers_data]
+            "losers": [l["symbol"] for l in losers_data],
+            "note": "These are the stocks WSB is talking about!"
         }
     except Exception as e:
         db.rollback()
