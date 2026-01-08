@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime
 from pydantic import BaseModel
+import threading
 
 from app.database import get_db
 from app.models import Stock
@@ -123,20 +124,29 @@ async def get_stock_by_symbol(
 @router.post("/fetch-movers")
 async def fetch_daily_movers(
     top_n: int = Query(5, description="Number of top winners/losers to fetch"),
-    db: Session = Depends(get_db)
+    background_tasks: BackgroundTasks = None
 ):
     """
-    Manually trigger fetching of daily movers (useful for testing)
+    Manually trigger fetching of daily movers (runs in background due to API rate limits)
     """
-    try:
-        winners, losers = stock_service.get_daily_movers(db, top_n)
-        
-        return {
-            "success": True,
-            "message": f"Fetched {len(winners)} winners and {len(losers)} losers",
-            "winners": [{"symbol": w.symbol, "change": w.price_change_pct} for w in winners],
-            "losers": [{"symbol": l.symbol, "change": l.price_change_pct} for l in losers]
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    def fetch_in_background():
+        from app.database import SessionLocal
+        db = SessionLocal()
+        try:
+            winners, losers = stock_service.get_daily_movers(db, top_n)
+            print(f"Background fetch completed: {len(winners)} winners, {len(losers)} losers")
+        except Exception as e:
+            print(f"Background fetch error: {e}")
+        finally:
+            db.close()
+    
+    # Start background thread
+    thread = threading.Thread(target=fetch_in_background, daemon=True)
+    thread.start()
+    
+    return {
+        "success": True,
+        "message": f"Stock fetch started in background. This will take ~2 minutes due to API rate limits. Check logs or refresh the page in a few minutes.",
+        "status": "processing"
+    }
 
