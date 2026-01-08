@@ -1,9 +1,10 @@
 import yfinance as yf
-import pandas as pd
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from typing import List, Dict, Tuple
 import logging
+import requests
+from bs4 import BeautifulSoup
 
 from app.models import Stock
 
@@ -16,22 +17,47 @@ def get_sp500_tickers() -> List[str]:
     Fetch S&P 500 ticker symbols from Wikipedia
     """
     try:
+        # Try to fetch from Wikipedia without pandas
         url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
-        tables = pd.read_html(url)
-        sp500_table = tables[0]
-        tickers = sp500_table['Symbol'].tolist()
-        # Replace dots with dashes for Yahoo Finance compatibility
-        tickers = [ticker.replace('.', '-') for ticker in tickers]
-        logger.info(f"Fetched {len(tickers)} S&P 500 tickers")
-        return tickers
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        
+        # Parse HTML
+        soup = BeautifulSoup(response.content, 'html.parser')
+        table = soup.find('table', {'id': 'constituents'})
+        
+        if table:
+            tickers = []
+            rows = table.find_all('tr')[1:]  # Skip header
+            for row in rows:
+                cols = row.find_all('td')
+                if cols:
+                    ticker = cols[0].text.strip()
+                    # Replace dots with dashes for Yahoo Finance compatibility
+                    ticker = ticker.replace('.', '-')
+                    tickers.append(ticker)
+            
+            if tickers:
+                logger.info(f"Fetched {len(tickers)} S&P 500 tickers from Wikipedia")
+                return tickers
     except Exception as e:
-        logger.error(f"Error fetching S&P 500 tickers: {e}")
-        # Return a subset of popular tickers as fallback
-        return ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'BRK-B', 
-                'UNH', 'JNJ', 'JPM', 'V', 'PG', 'XOM', 'HD', 'CVX', 'MA', 'BAC',
-                'ABBV', 'PFE', 'COST', 'KO', 'AVGO', 'MRK', 'PEP', 'TMO', 'WMT',
-                'CSCO', 'MCD', 'ABT', 'DHR', 'ACN', 'LIN', 'VZ', 'ADBE', 'NKE',
-                'CRM', 'TXN', 'NEE', 'CMCSA', 'PM', 'DIS', 'ORCL', 'WFC', 'UPS']
+        logger.error(f"Error fetching S&P 500 tickers from Wikipedia: {e}")
+    
+    # Return expanded fallback list with more stocks
+    logger.warning("Using fallback ticker list")
+    return ['AAPL', 'MSFT', 'GOOGL', 'GOOG', 'AMZN', 'NVDA', 'META', 'TSLA', 'BRK-B', 
+            'UNH', 'JNJ', 'JPM', 'V', 'PG', 'XOM', 'HD', 'CVX', 'MA', 'BAC',
+            'ABBV', 'PFE', 'COST', 'KO', 'AVGO', 'MRK', 'PEP', 'TMO', 'WMT',
+            'CSCO', 'MCD', 'ABT', 'DHR', 'ACN', 'LIN', 'VZ', 'ADBE', 'NKE',
+            'CRM', 'TXN', 'NEE', 'CMCSA', 'PM', 'DIS', 'ORCL', 'WFC', 'UPS',
+            'INTC', 'AMD', 'QCOM', 'NFLX', 'HON', 'RTX', 'IBM', 'SPGI', 'INTU',
+            'AMGN', 'CAT', 'GE', 'SBUX', 'AXP', 'NOW', 'TJX', 'BKNG', 'LOW',
+            'BLK', 'DE', 'MDLZ', 'GILD', 'SYK', 'MMC', 'ADP', 'CI', 'VRTX',
+            'AMT', 'ISRG', 'PLD', 'MO', 'CVS', 'C', 'LRCX', 'ZTS', 'SCHW',
+            'CB', 'REGN', 'ETN', 'ADI', 'SO', 'FI', 'DUK', 'BSX', 'TMUS',
+            'SLB', 'EOG', 'MMM', 'PNC', 'EQIX', 'HCA', 'USB', 'APD', 'CCI',
+            'NSC', 'ICE', 'MCO', 'CL', 'EMR', 'GM', 'GD', 'WM', 'PSX', 'F',
+            'KLAC', 'ITW', 'ANET', 'PYPL', 'AON', 'TGT', 'MSI', 'SHW', 'CARR']
 
 
 def fetch_stock_data(ticker: str, period: str = "5d") -> Dict:
