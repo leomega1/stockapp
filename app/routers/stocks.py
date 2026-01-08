@@ -55,10 +55,17 @@ async def get_daily_movers(
         if not stocks:
             raise HTTPException(status_code=404, detail="No stock data found for this date")
         
-        # Sort and get top 5 winners and losers
-        sorted_stocks = sorted(stocks, key=lambda x: x.price_change_pct, reverse=True)
-        winners = sorted_stocks[:5]
-        losers = sorted_stocks[-5:][::-1]
+        # Separate winners (positive) and losers (negative) FIRST
+        winners_list = [s for s in stocks if s.price_change_pct > 0]
+        losers_list = [s for s in stocks if s.price_change_pct < 0]
+        
+        # Sort winners descending (biggest gains first)
+        winners_list.sort(key=lambda x: x.price_change_pct, reverse=True)
+        winners = winners_list[:5]
+        
+        # Sort losers ascending (biggest losses first)
+        losers_list.sort(key=lambda x: x.price_change_pct)
+        losers = losers_list[:5]
         
         return {
             "date": target_date,
