@@ -16,43 +16,47 @@ scheduler = BackgroundScheduler()
 
 def daily_stock_analysis_job():
     """
-    Main job that runs daily to:
-    1. Fetch S&P 500 movers
-    2. Fetch news for each stock
-    3. Generate AI articles
+    Main job that runs daily at market close (4:30 PM ET) to:
+    1. Fetch REAL market biggest movers
+    2. Cross-reference with WSB trending
+    3. Generate AI articles for each stock with unique URLs
     """
-    logger.info("="*50)
-    logger.info(f"Starting daily stock analysis job at {datetime.now()}")
-    logger.info("="*50)
+    logger.info("="*70)
+    logger.info(f"🔥 Starting daily market analysis + AI article generation at {datetime.now()}")
+    logger.info("="*70)
     
     db = SessionLocal()
     
     try:
-        # Step 1: Get daily movers
-        logger.info("Step 1: Fetching daily movers...")
+        # Step 1: Get REAL market movers (HYBRID approach)
+        logger.info("Step 1: Fetching REAL market movers + WSB data...")
         winners, losers = get_daily_movers(db, top_n=5)
         
         all_movers = winners + losers
-        logger.info(f"Found {len(winners)} winners and {len(losers)} losers")
+        wsb_count = sum(1 for s in all_movers if s.is_wsb_trending)
+        logger.info(f"✅ Found {len(winners)} winners and {len(losers)} losers")
+        logger.info(f"🔥 {wsb_count} of them are also trending on WSB!")
         
-        # Step 2: Fetch news for each stock
-        logger.info("Step 2: Fetching news for stocks...")
-        for stock in all_movers:
-            try:
-                fetch_stock_news(db, stock.symbol, stock.name)
-            except Exception as e:
-                logger.error(f"Error fetching news for {stock.symbol}: {e}")
+        # Step 2: Fetch news for each stock (optional, can skip for faster processing)
+        # logger.info("Step 2: Fetching news for stocks...")
+        # for stock in all_movers:
+        #     try:
+        #         fetch_stock_news(db, stock.symbol, stock.name)
+        #     except Exception as e:
+        #         logger.error(f"Error fetching news for {stock.symbol}: {e}")
         
-        # Step 3: Generate articles
-        logger.info("Step 3: Generating AI articles...")
+        # Step 3: Generate AI articles with unique URLs
+        logger.info("Step 2: Generating AI articles with unique URLs...")
         generate_articles_for_movers(db, winners, losers)
         
-        logger.info("="*50)
-        logger.info("Daily stock analysis job completed successfully!")
-        logger.info("="*50)
+        logger.info("="*70)
+        logger.info("✅ Daily analysis + AI articles completed successfully!")
+        logger.info("🚀 Articles are now available at unique URLs like:")
+        logger.info("   /WhyDidLVROWGoUp177PercentToday-Jan82026")
+        logger.info("="*70)
         
     except Exception as e:
-        logger.error(f"Error in daily stock analysis job: {e}", exc_info=True)
+        logger.error(f"❌ Error in daily analysis job: {e}", exc_info=True)
     finally:
         db.close()
 

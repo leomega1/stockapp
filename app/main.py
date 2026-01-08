@@ -31,11 +31,10 @@ async def startup_event():
     """Initialize database on startup"""
     init_db()
     
-    # Disable scheduler on startup to avoid boot timeout
-    # Use the /api/stocks/fetch-movers endpoint to manually trigger data fetching
-    # if settings.scheduler_enabled:
-    #     from app.services.scheduler import start_scheduler
-    #     start_scheduler()
+    # Start scheduler to run daily at market close (4:30 PM ET)
+    if settings.scheduler_enabled:
+        from app.services.scheduler import start_scheduler
+        start_scheduler()
 
 
 @app.get("/")

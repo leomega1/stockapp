@@ -125,6 +125,27 @@ async def get_stock_by_symbol(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/wsb-trending", response_model=List[StockResponse])
+async def get_wsb_trending(
+    db: Session = Depends(get_db)
+):
+    """
+    Get stocks that are currently trending on WSB (separate from market movers)
+    """
+    try:
+        # Get stocks where is_wsb_trending = 1
+        wsb_stocks = db.query(Stock).filter(Stock.is_wsb_trending == 1).order_by(Stock.wsb_mentions.desc()).all()
+        
+        if not wsb_stocks:
+            raise HTTPException(status_code=404, detail="No WSB trending stocks found")
+        
+        return wsb_stocks
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/fetch-movers")
 async def fetch_daily_movers(
     top_n: int = Query(5, description="Number of top winners/losers to fetch"),

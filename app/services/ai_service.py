@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from datetime import datetime
 from typing import Dict
 import logging
+import re
 
 from app.models import Article, Stock
 from app.services.news_service import get_news_summary_for_article
@@ -12,6 +13,23 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 settings = get_settings()
+
+
+def generate_article_slug(symbol: str, price_change_pct: float, date: datetime) -> str:
+    """
+    Generate a unique URL slug for an article
+    Example: WhyDidGMEGoUp15PercentToday-Jan82026
+    """
+    direction = "GoUp" if price_change_pct > 0 else "GoDown"
+    abs_change = abs(int(price_change_pct))
+    date_str = date.strftime("%b%d%Y")  # Jan82026
+    
+    slug = f"WhyDid{symbol}{direction}{abs_change}PercentToday-{date_str}"
+    
+    # Remove any special characters and ensure it's URL-safe
+    slug = re.sub(r'[^a-zA-Z0-9-]', '', slug)
+    
+    return slug
 
 
 def generate_article_with_claude(
@@ -174,20 +192,24 @@ def create_article_for_stock(db: Session, stock: Stock, movement_type: str) -> A
         movement_type=movement_type
     )
     
+    # Generate unique slug for the article URL
+    slug = generate_article_slug(stock.symbol, stock.price_change_pct, stock.date)
+    
     # Create and save article
     article = Article(
         stock_symbol=stock.symbol,
         date=stock.date,
         title=article_data['title'],
         content=article_data['content'],
-        movement_type=movement_type
+        movement_type=movement_type,
+        slug=slug
     )
     
     db.add(article)
     db.commit()
     db.refresh(article)
     
-    logger.info(f"Saved article for {stock.symbol}: {article.title}")
+    logger.info(f"Saved article for {stock.symbol}: {article.title} (/{slug})")
     
     return article
 

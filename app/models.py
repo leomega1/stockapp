@@ -35,7 +35,8 @@ class Article(Base):
     date = Column(DateTime, index=True)
     title = Column(String)
     content = Column(Text)
-    movement_type = Column(String)  # "winner" or "loser"
+    movement_type = Column(String)  # "winner", "loser", or "wsb_trending"
+    slug = Column(String, unique=True, index=True)  # Unique URL: WhyDidGMEGoUp15PercentToday-Jan82026
     created_at = Column(DateTime, default=datetime.utcnow)
     
     stock = relationship("Stock", back_populates="articles")

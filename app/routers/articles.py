@@ -17,6 +17,7 @@ class ArticleResponse(BaseModel):
     title: str
     content: str
     movement_type: str
+    slug: Optional[str] = None
     created_at: datetime
     
     class Config:
@@ -30,6 +31,7 @@ class ArticleWithStockResponse(BaseModel):
     title: str
     content: str
     movement_type: str
+    slug: Optional[str] = None
     created_at: datetime
     stock_name: Optional[str] = None
     stock_price: Optional[float] = None
@@ -108,6 +110,45 @@ async def get_daily_articles(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/slug/{slug}", response_model=ArticleWithStockResponse)
+async def get_article_by_slug(
+    slug: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get a specific article by its URL slug
+    Example: /api/articles/slug/WhyDidGMEGoUp15PercentToday-Jan82026
+    """
+    try:
+        article = db.query(Article).filter(Article.slug == slug).first()
+        
+        if not article:
+            raise HTTPException(status_code=404, detail="Article not found")
+        
+        # Get stock data
+        stock = db.query(Stock).filter(
+            Stock.symbol == article.stock_symbol
+        ).order_by(Stock.date.desc()).first()
+        
+        return ArticleWithStockResponse(
+            id=article.id,
+            stock_symbol=article.stock_symbol,
+            date=article.date,
+            title=article.title,
+            content=article.content,
+            movement_type=article.movement_type,
+            slug=article.slug,
+            created_at=article.created_at,
+            stock_name=stock.name if stock else None,
+            stock_price=stock.price if stock else None,
+            stock_change_pct=stock.price_change_pct if stock else None
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/{article_id}", response_model=ArticleWithStockResponse)
 async def get_article_by_id(
     article_id: int,
@@ -134,6 +175,7 @@ async def get_article_by_id(
             title=article.title,
             content=article.content,
             movement_type=article.movement_type,
+            slug=article.slug,
             created_at=article.created_at,
             stock_name=stock.name if stock else None,
             stock_price=stock.price if stock else None,
