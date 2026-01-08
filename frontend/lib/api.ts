@@ -1,4 +1,4 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://stockapp-backend-8bb98a510249.herokuapp.com'
 
 export interface Stock {
   id: number
