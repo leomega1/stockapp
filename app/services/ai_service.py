@@ -63,7 +63,7 @@ def generate_article_with_claude(
     if not settings.anthropic_api_key:
         logger.warning("ANTHROPIC_API_KEY not set, using fallback article generation")
         return generate_fallback_article(
-            symbol, company_name, price_change_pct, price, volume, news_summary, movement_type
+            symbol, company_name, price_change_pct, price, volume, news_summary, social_context, movement_type
         )
     
     try:
@@ -140,7 +140,7 @@ ARTICLE:
     except Exception as e:
         logger.error(f"Error generating article with Claude for {symbol}: {e}")
         return generate_fallback_article(
-            symbol, company_name, price_change_pct, price, volume, news_summary, movement_type
+            symbol, company_name, price_change_pct, price, volume, news_summary, social_context, movement_type
         )
 
 
