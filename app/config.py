@@ -14,12 +14,6 @@ class Settings(BaseSettings):
     
     class Config:
         env_file = ".env"
-    
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        # Heroku Postgres URLs start with postgres://, but SQLAlchemy needs postgresql://
-        if self.database_url and self.database_url.startswith("postgres://"):
-            self.database_url = self.database_url.replace("postgres://", "postgresql://", 1)
 
 
 @lru_cache()
