@@ -18,6 +18,7 @@ export interface Article {
   title: string
   content: string
   movement_type: 'winner' | 'loser'
+  slug: string | null
   created_at: string
   stock_name?: string
   stock_price?: number
@@ -75,6 +76,10 @@ class APIClient {
 
   async getArticlesBySymbol(symbol: string, limit: number = 10): Promise<Article[]> {
     return this.fetch<Article[]>(`/api/articles/stock/${symbol}?limit=${limit}`)
+  }
+
+  async getArticleBySlug(slug: string): Promise<Article> {
+    return this.fetch<Article>(`/api/articles/slug/${slug}`)
   }
 
   async getStockNews(symbol: string): Promise<NewsItem[]> {

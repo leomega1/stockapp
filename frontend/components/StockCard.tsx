@@ -2,11 +2,22 @@
 
 import { Stock } from '@/lib/api'
 import Link from 'next/link'
+import { format } from 'date-fns'
 
 interface StockCardProps {
   stock: Stock
   type: 'winner' | 'loser'
   rank: number
+}
+
+// Generate SEO-friendly slug (matching backend logic)
+function generateArticleSlug(symbol: string, priceChangePct: number, date: Date): string {
+  const direction = priceChangePct > 0 ? 'GoUp' : 'GoDown'
+  const absChange = Math.abs(Math.floor(priceChangePct))
+  const dateStr = format(date, 'MMMddyyyy') // Jan082026
+  
+  const slug = `WhyDid${symbol}${direction}${absChange}PercentToday-${dateStr}`
+  return slug.replace(/[^a-zA-Z0-9-]/g, '')
 }
 
 export default function StockCard({ stock, type, rank }: StockCardProps) {
@@ -19,9 +30,12 @@ export default function StockCard({ stock, type, rank }: StockCardProps) {
   const formattedChange = stock.price_change_pct > 0 ? `+${stock.price_change_pct.toFixed(2)}%` : `${stock.price_change_pct.toFixed(2)}%`
   const formattedPrice = `$${stock.price.toFixed(2)}`
   const formattedVolume = new Intl.NumberFormat('en-US', { notation: 'compact' }).format(stock.volume)
+  
+  // Generate SEO-friendly URL slug
+  const articleSlug = generateArticleSlug(stock.symbol, stock.price_change_pct, new Date(stock.date))
 
   return (
-    <Link href={`/article/${stock.symbol}`}>
+    <Link href={`/article/${articleSlug}`}>
       <div className={`${bgColor} ${borderColor} border-2 rounded-lg p-6 hover:shadow-lg transition-all duration-200 cursor-pointer transform hover:-translate-y-1`}>
         <div className="flex items-start justify-between mb-4">
           <div>

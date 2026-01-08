@@ -10,36 +10,41 @@ import Link from 'next/link'
 
 export default function ArticlePage() {
   const params = useParams()
-  const symbol = params.symbol as string
+  const slug = params.slug as string
 
-  // Fetch article for the stock
-  const { data: articles, isLoading: articlesLoading, error: articlesError } = useQuery({
-    queryKey: ['articles', symbol],
-    queryFn: () => api.getArticlesBySymbol(symbol, 1),
+  // Fetch article by SEO-friendly slug
+  const { data: article, isLoading: articlesLoading, error: articlesError } = useQuery({
+    queryKey: ['article', slug],
+    queryFn: () => api.getArticleBySlug(slug),
   })
+
+  // Get symbol from article once loaded
+  const symbol = article?.stock_symbol
 
   // Fetch stock data
   const { data: stock, isLoading: stockLoading } = useQuery({
     queryKey: ['stock', symbol],
-    queryFn: () => api.getStockBySymbol(symbol),
+    queryFn: () => symbol ? api.getStockBySymbol(symbol) : Promise.resolve(null),
+    enabled: !!symbol,
   })
 
   // Fetch news for the stock
   const { data: news, isLoading: newsLoading } = useQuery({
     queryKey: ['news', symbol],
-    queryFn: () => api.getStockNews(symbol),
+    queryFn: () => symbol ? api.getStockNews(symbol) : Promise.resolve([]),
     retry: false,
+    enabled: !!symbol,
   })
 
   if (articlesLoading || stockLoading) {
     return <LoadingSpinner />
   }
 
-  if (articlesError || !articles || articles.length === 0) {
+  if (articlesError || !article) {
     return (
       <div className="max-w-4xl mx-auto px-4 py-12">
         <ErrorMessage 
-          message={`No article found for ${symbol}. Make sure to fetch daily movers first.`} 
+          message={`Article not found. The URL may be invalid or the article has not been generated yet.`} 
         />
         <div className="text-center mt-6">
           <Link 
@@ -52,8 +57,6 @@ export default function ArticlePage() {
       </div>
     )
   }
-
-  const article = articles[0]
   const isWinner = article.movement_type === 'winner'
   const bgColor = isWinner ? 'bg-green-50 dark:bg-green-900/20' : 'bg-red-50 dark:bg-red-900/20'
   const borderColor = isWinner ? 'border-green-200 dark:border-green-800' : 'border-red-200 dark:border-red-800'
