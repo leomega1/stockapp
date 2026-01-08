@@ -109,38 +109,10 @@ def fetch_stock_data(ticker: str, period: str = "5d") -> Dict:
         return None
 
 
-def get_market_cap(ticker: str) -> float:
-    """
-    Get market cap for a stock using Alpha Vantage OVERVIEW endpoint
-    Returns market cap in millions
-    """
-    try:
-        url = "https://www.alphavantage.co/query"
-        params = {
-            "function": "OVERVIEW",
-            "symbol": ticker,
-            "apikey": ALPHA_VANTAGE_API_KEY
-        }
-        
-        response = requests.get(url, params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        
-        market_cap_str = data.get('MarketCapitalization', '0')
-        if market_cap_str and market_cap_str != 'None':
-            market_cap = float(market_cap_str) / 1_000_000  # Convert to millions
-            return market_cap
-        return 0
-        
-    except Exception as e:
-        logger.warning(f"Could not get market cap for {ticker}: {e}")
-        return 0
-
-
 def fetch_market_top_movers() -> Dict:
     """
     Fetch REAL top gainers and losers from Alpha Vantage
-    FILTERS OUT micro-caps (< $500M market cap)
+    FILTERS OUT penny stocks (price < $5)
     Returns dict with 'top_gainers' and 'top_losers' lists
     """
     try:
@@ -155,53 +127,34 @@ def fetch_market_top_movers() -> Dict:
         data = response.json()
         
         if "top_gainers" in data and "top_losers" in data:
-            # Filter out penny stocks/micro-caps
-            MIN_MARKET_CAP = 500  # $500M minimum
-            MIN_PRICE = 5.0  # $5 minimum price (quick filter before API call)
+            # Simple filter: Only include stocks with price >= $5
+            MIN_PRICE = 5.0
             
             filtered_gainers = []
             for stock in data['top_gainers']:
                 try:
                     price = float(stock['price'])
-                    # Quick filter: skip penny stocks (< $5)
-                    if price < MIN_PRICE:
-                        logger.debug(f"Skipping {stock['ticker']} - penny stock (${price})")
-                        continue
-                    
-                    # Check market cap (this makes API call, so we limit checks)
-                    if len(filtered_gainers) < 20:  # Only check first 20 to avoid rate limits
-                        time.sleep(1)  # Rate limit protection
-                        market_cap = get_market_cap(stock['ticker'])
-                        if market_cap >= MIN_MARKET_CAP:
-                            filtered_gainers.append(stock)
-                            logger.info(f"✅ {stock['ticker']}: ${price}, Market Cap: ${market_cap:.0f}M")
-                        else:
-                            logger.info(f"❌ {stock['ticker']}: ${price}, Market Cap: ${market_cap:.0f}M - TOO SMALL")
+                    if price >= MIN_PRICE:
+                        filtered_gainers.append(stock)
+                        logger.info(f"✅ Gainer: {stock['ticker']} ${price} ({stock['change_percentage']})")
+                    else:
+                        logger.debug(f"⏭️  Skipped: {stock['ticker']} ${price} - penny stock")
                 except Exception as e:
-                    logger.error(f"Error filtering {stock.get('ticker', 'unknown')}: {e}")
+                    logger.error(f"Error filtering gainer {stock.get('ticker', 'unknown')}: {e}")
             
             filtered_losers = []
             for stock in data['top_losers']:
                 try:
                     price = float(stock['price'])
-                    # Quick filter: skip penny stocks
-                    if price < MIN_PRICE:
-                        logger.debug(f"Skipping {stock['ticker']} - penny stock (${price})")
-                        continue
-                    
-                    # Check market cap
-                    if len(filtered_losers) < 20:
-                        time.sleep(1)  # Rate limit protection
-                        market_cap = get_market_cap(stock['ticker'])
-                        if market_cap >= MIN_MARKET_CAP:
-                            filtered_losers.append(stock)
-                            logger.info(f"✅ {stock['ticker']}: ${price}, Market Cap: ${market_cap:.0f}M")
-                        else:
-                            logger.info(f"❌ {stock['ticker']}: ${price}, Market Cap: ${market_cap:.0f}M - TOO SMALL")
+                    if price >= MIN_PRICE:
+                        filtered_losers.append(stock)
+                        logger.info(f"✅ Loser: {stock['ticker']} ${price} ({stock['change_percentage']})")
+                    else:
+                        logger.debug(f"⏭️  Skipped: {stock['ticker']} ${price} - penny stock")
                 except Exception as e:
-                    logger.error(f"Error filtering {stock.get('ticker', 'unknown')}: {e}")
+                    logger.error(f"Error filtering loser {stock.get('ticker', 'unknown')}: {e}")
             
-            logger.info(f"✅ After filtering: {len(filtered_gainers)} gainers, {len(filtered_losers)} losers (all > $500M market cap)")
+            logger.info(f"✅ After filtering: {len(filtered_gainers)} gainers, {len(filtered_losers)} losers (all price >= $5)")
             return {"top_gainers": filtered_gainers, "top_losers": filtered_losers}
         else:
             logger.warning("No top movers data in Alpha Vantage response")
