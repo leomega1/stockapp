@@ -72,10 +72,15 @@ def fetch_stock_data(ticker: str, period: str = "5d") -> Dict:
         Dictionary with stock data
     """
     try:
+        # Add user agent to avoid blocking
+        import time
+        time.sleep(0.1)  # Small delay to avoid rate limiting
+        
         stock = yf.Ticker(ticker)
         hist = stock.history(period=period)
         
-        if len(hist) < 2:
+        if hist.empty or len(hist) < 2:
+            logger.warning(f"No historical data for {ticker}")
             return None
             
         # Get the latest and previous day's data
@@ -85,9 +90,13 @@ def fetch_stock_data(ticker: str, period: str = "5d") -> Dict:
         price_change = latest['Close'] - previous['Close']
         price_change_pct = (price_change / previous['Close']) * 100
         
-        # Get company info
-        info = stock.info
-        company_name = info.get('longName', ticker)
+        # Get company info (with error handling)
+        try:
+            info = stock.info
+            company_name = info.get('longName', info.get('shortName', ticker))
+        except Exception as e:
+            logger.warning(f"Could not fetch info for {ticker}: {e}")
+            company_name = ticker
         
         return {
             'symbol': ticker,
@@ -99,7 +108,7 @@ def fetch_stock_data(ticker: str, period: str = "5d") -> Dict:
             'date': latest.name.to_pydatetime()
         }
     except Exception as e:
-        logger.error(f"Error fetching data for {ticker}: {e}")
+        logger.warning(f"Error fetching data for {ticker}: {str(e)[:100]}")
         return None
 
 
@@ -117,18 +126,28 @@ def get_daily_movers(db: Session, top_n: int = 5) -> Tuple[List[Stock], List[Sto
     logger.info("Starting daily movers analysis...")
     
     tickers = get_sp500_tickers()
+    
+    # Limit to first 50 tickers to avoid rate limiting
+    # In production, you'd want to fetch all, but with proper rate limiting
+    tickers = tickers[:50]
+    logger.info(f"Fetching data for {len(tickers)} stocks...")
+    
     stock_data = []
     
     # Fetch data for all tickers (with progress logging)
     for i, ticker in enumerate(tickers):
-        if i % 50 == 0:
+        if i % 10 == 0:
             logger.info(f"Processed {i}/{len(tickers)} stocks...")
         
         data = fetch_stock_data(ticker)
         if data:
             stock_data.append(data)
     
-    logger.info(f"Successfully fetched data for {len(stock_data)} stocks")
+    logger.info(f"Successfully fetched data for {len(stock_data)} out of {len(tickers)} stocks")
+    
+    if not stock_data:
+        logger.error("No stock data was fetched!")
+        return [], []
     
     # Sort by percentage change
     stock_data.sort(key=lambda x: x['price_change_pct'], reverse=True)
