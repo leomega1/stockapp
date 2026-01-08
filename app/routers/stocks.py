@@ -123,30 +123,36 @@ async def get_stock_by_symbol(
 
 @router.post("/fetch-movers")
 async def fetch_daily_movers(
-    top_n: int = Query(5, description="Number of top winners/losers to fetch"),
-    background_tasks: BackgroundTasks = None
+    top_n: int = Query(5, description="Number of top winners/losers to fetch")
 ):
     """
     Manually trigger fetching of daily movers (runs in background due to API rate limits)
     """
-    def fetch_in_background():
-        from app.database import SessionLocal
-        db = SessionLocal()
-        try:
-            winners, losers = stock_service.get_daily_movers(db, top_n)
-            print(f"Background fetch completed: {len(winners)} winners, {len(losers)} losers")
-        except Exception as e:
-            print(f"Background fetch error: {e}")
-        finally:
-            db.close()
+    import logging
+    logger = logging.getLogger(__name__)
     
-    # Start background thread
+    def fetch_in_background():
+        try:
+            from app.database import SessionLocal
+            logger.info("Starting background stock fetch...")
+            db = SessionLocal()
+            try:
+                winners, losers = stock_service.get_daily_movers(db, top_n)
+                logger.info(f"✅ Background fetch completed: {len(winners)} winners, {len(losers)} losers")
+            finally:
+                db.close()
+        except Exception as e:
+            logger.error(f"❌ Background fetch error: {e}")
+    
+    # Start thread and return immediately (don't wait)
     thread = threading.Thread(target=fetch_in_background, daemon=True)
     thread.start()
     
+    # Return immediately without waiting for thread
     return {
         "success": True,
-        "message": f"Stock fetch started in background. This will take ~2 minutes due to API rate limits. Check logs or refresh the page in a few minutes.",
-        "status": "processing"
+        "message": "Stock fetch started in background. Check back in ~2 minutes due to API rate limits (5 calls/minute).",
+        "status": "processing",
+        "note": "Refresh your website in 2-3 minutes to see the data"
     }
 
