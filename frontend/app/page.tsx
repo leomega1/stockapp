@@ -20,7 +20,7 @@ export default function Dashboard() {
   if (error) {
     return (
       <ErrorMessage 
-        message="Failed to load stock data. Make sure the backend API is running at http://localhost:8000" 
+        message="Failed to load stock data. The backend API may be starting up or there may be no data yet. Please try again in a moment." 
       />
     )
   }
