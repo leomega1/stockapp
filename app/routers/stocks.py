@@ -146,6 +146,54 @@ async def get_wsb_trending(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/generate-articles")
+async def generate_articles_now(
+    db: Session = Depends(get_db)
+):
+    """
+    🔥 Manually trigger AI article generation for today's stocks
+    This demonstrates the SECRET SAUCE: News + WSB + Twitter aggregation
+    """
+    try:
+        from app.services.ai_service import generate_articles_for_movers
+        from datetime import datetime, timedelta
+        
+        # Get today's stocks
+        today = datetime.now()
+        start_of_day = datetime(today.year, today.month, today.day)
+        end_of_day = start_of_day + timedelta(days=1)
+        
+        stocks = db.query(Stock).filter(
+            Stock.date >= start_of_day,
+            Stock.date < end_of_day
+        ).order_by(Stock.price_change_pct.desc()).all()
+        
+        if not stocks:
+            raise HTTPException(status_code=404, detail="No stocks found. Run /fetch-movers first")
+        
+        # Separate winners and losers
+        winners = [s for s in stocks if s.price_change_pct > 0][:5]
+        losers = [s for s in stocks if s.price_change_pct < 0][-5:]
+        
+        # Generate comprehensive AI articles
+        generate_articles_for_movers(db, winners, losers)
+        
+        return {
+            "success": True,
+            "message": f"Generated {len(winners) + len(losers)} comprehensive AI articles",
+            "articles_for": {
+                "winners": [w.symbol for w in winners],
+                "losers": [l.symbol for l in losers]
+            },
+            "note": "Each article aggregates: News + WSB comments + Twitter mentions"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/fetch-movers")
 async def fetch_daily_movers(
     top_n: int = Query(5, description="Number of top winners/losers to fetch"),
