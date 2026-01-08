@@ -6,14 +6,17 @@ import os
 
 settings = get_settings()
 
-# Get database URL and fix Heroku Postgres URL format
-database_url = settings.database_url
-if database_url.startswith("postgres://"):
-    database_url = database_url.replace("postgres://", "postgresql://", 1)
+# Temporarily force SQLite to avoid Postgres connection issues
+database_url = "sqlite:///./stockapp.db"
+
+# Uncomment this when Postgres is working:
+# database_url = settings.database_url
+# if database_url.startswith("postgres://"):
+#     database_url = database_url.replace("postgres://", "postgresql://", 1)
 
 engine = create_engine(
     database_url,
-    connect_args={"check_same_thread": False} if "sqlite" in database_url else {}
+    connect_args={"check_same_thread": False}
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

@@ -121,6 +121,55 @@ async def get_stock_by_symbol(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/add-test-data")
+async def add_test_data(
+    db: Session = Depends(get_db)
+):
+    """
+    Add test data to see the app working
+    """
+    from datetime import datetime
+    
+    try:
+        # Clear existing data
+        db.query(Stock).delete()
+        db.commit()
+        
+        # Add winners
+        winners_data = [
+            {"symbol": "NVDA", "name": "NVIDIA Corporation", "price": 520.50, "price_change": 15.30, "price_change_pct": 3.03, "volume": 45000000, "date": datetime.now()},
+            {"symbol": "MSFT", "name": "Microsoft Corporation", "price": 380.25, "price_change": 8.50, "price_change_pct": 2.29, "volume": 28000000, "date": datetime.now()},
+            {"symbol": "GOOGL", "name": "Alphabet Inc.", "price": 142.80, "price_change": 3.20, "price_change_pct": 2.29, "volume": 32000000, "date": datetime.now()},
+            {"symbol": "AMZN", "name": "Amazon.com Inc.", "price": 178.90, "price_change": 3.40, "price_change_pct": 1.94, "volume": 41000000, "date": datetime.now()},
+            {"symbol": "TSLA", "name": "Tesla Inc.", "price": 245.60, "price_change": 4.10, "price_change_pct": 1.70, "volume": 95000000, "date": datetime.now()},
+        ]
+        
+        # Add losers
+        losers_data = [
+            {"symbol": "AAPL", "name": "Apple Inc.", "price": 185.50, "price_change": -3.80, "price_change_pct": -2.01, "volume": 52000000, "date": datetime.now()},
+            {"symbol": "META", "name": "Meta Platforms Inc.", "price": 485.20, "price_change": -9.50, "price_change_pct": -1.92, "volume": 18000000, "date": datetime.now()},
+            {"symbol": "UNH", "name": "UnitedHealth Group", "price": 520.30, "price_change": -8.70, "price_change_pct": -1.64, "volume": 3500000, "date": datetime.now()},
+            {"symbol": "JNJ", "name": "Johnson & Johnson", "price": 158.90, "price_change": -2.10, "price_change_pct": -1.30, "volume": 7200000, "date": datetime.now()},
+            {"symbol": "JPM", "name": "JPMorgan Chase", "price": 215.40, "price_change": -2.60, "price_change_pct": -1.19, "volume": 11000000, "date": datetime.now()},
+        ]
+        
+        for data in winners_data + losers_data:
+            stock = Stock(**data)
+            db.add(stock)
+        
+        db.commit()
+        
+        return {
+            "success": True,
+            "message": "Added 5 winners and 5 losers test data",
+            "winners": [w["symbol"] for w in winners_data],
+            "losers": [l["symbol"] for l in losers_data]
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/fetch-movers")
 async def fetch_daily_movers(
     top_n: int = Query(5, description="Number of top winners/losers to fetch")
