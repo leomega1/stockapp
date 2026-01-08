@@ -128,11 +128,13 @@ async def fetch_daily_movers(
     """
     Manually trigger fetching of daily movers (runs in background due to API rate limits)
     """
+    import asyncio
     import logging
     logger = logging.getLogger(__name__)
     
-    def fetch_in_background():
+    async def fetch_in_background_async():
         try:
+            await asyncio.sleep(0.1)  # Let the response return first
             from app.database import SessionLocal
             logger.info("Starting background stock fetch...")
             db = SessionLocal()
@@ -144,15 +146,13 @@ async def fetch_daily_movers(
         except Exception as e:
             logger.error(f"❌ Background fetch error: {e}")
     
-    # Start thread and return immediately (don't wait)
-    thread = threading.Thread(target=fetch_in_background, daemon=True)
-    thread.start()
+    # Fire and forget - don't await
+    asyncio.create_task(fetch_in_background_async())
     
-    # Return immediately without waiting for thread
+    # Return immediately
     return {
         "success": True,
-        "message": "Stock fetch started in background. Check back in ~2 minutes due to API rate limits (5 calls/minute).",
-        "status": "processing",
-        "note": "Refresh your website in 2-3 minutes to see the data"
+        "message": "Stock fetch started in background. Check back in ~2 minutes.",
+        "status": "processing"
     }
 
