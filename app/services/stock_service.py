@@ -1,37 +1,29 @@
 import yfinance as yf
-import pandas as pd
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from typing import List, Dict, Tuple
 import logging
 
 from app.models import Stock
+from app.services.trending_service import get_combined_trending_tickers
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def get_sp500_tickers() -> List[str]:
+def get_trending_tickers() -> List[str]:
     """
-    Fetch S&P 500 ticker symbols from Wikipedia
+    Fetch LIVE trending tickers from WSB and Twitter
     """
     try:
-        url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
-        tables = pd.read_html(url)
-        sp500_table = tables[0]
-        tickers = sp500_table['Symbol'].tolist()
-        # Replace dots with dashes for Yahoo Finance compatibility
-        tickers = [ticker.replace('.', '-') for ticker in tickers]
-        logger.info(f"Fetched {len(tickers)} S&P 500 tickers")
+        trending_data = get_combined_trending_tickers(limit=20)
+        tickers = [item['ticker'] for item in trending_data if item['ticker']]
+        logger.info(f"🔥 Fetched {len(tickers)} LIVE trending tickers from WSB")
         return tickers
     except Exception as e:
-        logger.error(f"Error fetching S&P 500 tickers: {e}")
-        # Return a subset of popular tickers as fallback
-        return ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'BRK-B', 
-                'UNH', 'JNJ', 'JPM', 'V', 'PG', 'XOM', 'HD', 'CVX', 'MA', 'BAC',
-                'ABBV', 'PFE', 'COST', 'KO', 'AVGO', 'MRK', 'PEP', 'TMO', 'WMT',
-                'CSCO', 'MCD', 'ABT', 'DHR', 'ACN', 'LIN', 'VZ', 'ADBE', 'NKE',
-                'CRM', 'TXN', 'NEE', 'CMCSA', 'PM', 'DIS', 'ORCL', 'WFC', 'UPS']
+        logger.error(f"Error fetching trending tickers: {e}")
+        # Fallback to popular meme stocks
+        return ['GME', 'AMC', 'TSLA', 'NVDA', 'PLTR', 'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META']
 
 
 def fetch_stock_data(ticker: str, period: str = "5d") -> Dict:
@@ -79,7 +71,7 @@ def fetch_stock_data(ticker: str, period: str = "5d") -> Dict:
 
 def get_daily_movers(db: Session, top_n: int = 5) -> Tuple[List[Stock], List[Stock]]:
     """
-    Fetch and analyze S&P 500 stocks to find biggest winners and losers
+    Fetch and analyze TRENDING WSB stocks to find biggest winners and losers
     
     Args:
         db: Database session
@@ -88,21 +80,34 @@ def get_daily_movers(db: Session, top_n: int = 5) -> Tuple[List[Stock], List[Sto
     Returns:
         Tuple of (winners, losers) as Stock objects
     """
-    logger.info("Starting daily movers analysis...")
+    logger.info("🔥 Starting LIVE trending stocks analysis from WSB...")
     
-    tickers = get_sp500_tickers()
+    # Clear old data first to avoid duplicates
+    db.query(Stock).delete()
+    db.commit()
+    logger.info("✅ Cleared old stock data")
+    
+    # Get LIVE trending tickers from WSB
+    tickers = get_trending_tickers()
+    logger.info(f"📊 Analyzing {len(tickers)} trending stocks: {', '.join(tickers[:10])}...")
+    
     stock_data = []
     
-    # Fetch data for all tickers (with progress logging)
+    # Fetch data for trending tickers
     for i, ticker in enumerate(tickers):
-        if i % 50 == 0:
-            logger.info(f"Processed {i}/{len(tickers)} stocks...")
+        logger.info(f"Fetching {i+1}/{len(tickers)}: {ticker}...")
         
         data = fetch_stock_data(ticker)
         if data:
             stock_data.append(data)
+            logger.info(f"✓ {ticker}: {data['price_change_pct']:+.2f}%")
+        else:
+            logger.warning(f"✗ Failed to get data for {ticker}")
     
-    logger.info(f"Successfully fetched data for {len(stock_data)} stocks")
+    logger.info(f"Successfully fetched data for {len(stock_data)} trending stocks")
+    
+    if len(stock_data) < top_n * 2:
+        logger.warning(f"Only got {len(stock_data)} stocks, expected at least {top_n * 2}")
     
     # Sort by percentage change
     stock_data.sort(key=lambda x: x['price_change_pct'], reverse=True)
@@ -119,17 +124,17 @@ def get_daily_movers(db: Session, top_n: int = 5) -> Tuple[List[Stock], List[Sto
         stock = Stock(**data)
         db.add(stock)
         winners.append(stock)
-        logger.info(f"Winner: {data['symbol']} ({data['name']}) +{data['price_change_pct']:.2f}%")
+        logger.info(f"🚀 Winner: {data['symbol']} ({data['name']}) +{data['price_change_pct']:.2f}%")
     
     for data in losers_data:
         stock = Stock(**data)
         db.add(stock)
         losers.append(stock)
-        logger.info(f"Loser: {data['symbol']} ({data['name']}) {data['price_change_pct']:.2f}%")
+        logger.info(f"📉 Loser: {data['symbol']} ({data['name']}) {data['price_change_pct']:.2f}%")
     
     db.commit()
     
-    logger.info(f"Saved {len(winners)} winners and {len(losers)} losers to database")
+    logger.info(f"✅ Saved {len(winners)} winners and {len(losers)} losers to database")
     
     return winners, losers
 
