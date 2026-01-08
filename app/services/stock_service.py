@@ -109,9 +109,38 @@ def fetch_stock_data(ticker: str, period: str = "5d") -> Dict:
         return None
 
 
+def fetch_market_top_movers() -> Dict:
+    """
+    Fetch REAL top gainers and losers from Alpha Vantage
+    Returns dict with 'top_gainers' and 'top_losers' lists
+    """
+    try:
+        url = "https://www.alphavantage.co/query"
+        params = {
+            "function": "TOP_GAINERS_LOSERS",
+            "apikey": ALPHA_VANTAGE_API_KEY
+        }
+        
+        response = requests.get(url, params=params, timeout=15)
+        response.raise_for_status()
+        data = response.json()
+        
+        if "top_gainers" in data and "top_losers" in data:
+            logger.info(f"✅ Fetched {len(data['top_gainers'])} gainers and {len(data['top_losers'])} losers from Alpha Vantage")
+            return data
+        else:
+            logger.warning("No top movers data in Alpha Vantage response")
+            return {"top_gainers": [], "top_losers": []}
+            
+    except Exception as e:
+        logger.error(f"Error fetching top movers: {e}")
+        return {"top_gainers": [], "top_losers": []}
+
+
 def get_daily_movers(db: Session, top_n: int = 5) -> Tuple[List[Stock], List[Stock]]:
     """
-    Fetch and analyze TRENDING WSB stocks to find biggest winners and losers
+    Fetch REAL market top movers and mark which ones are trending on WSB
+    HYBRID APPROACH: Shows actual biggest market movers + WSB trending indicators
     
     Args:
         db: Database session
@@ -120,68 +149,92 @@ def get_daily_movers(db: Session, top_n: int = 5) -> Tuple[List[Stock], List[Sto
     Returns:
         Tuple of (winners, losers) as Stock objects
     """
-    logger.info("🔥 Starting LIVE trending stocks analysis from WSB...")
+    logger.info("🔥 Starting HYBRID analysis: Real market movers + WSB trending...")
     
     # Clear old data first to avoid duplicates
     db.query(Stock).delete()
     db.commit()
     logger.info("✅ Cleared old stock data")
     
-    # Get LIVE trending tickers from WSB
-    tickers = get_trending_tickers()
-    logger.info(f"📊 Analyzing {len(tickers)} trending stocks: {', '.join(tickers[:10])}...")
+    # Step 1: Get WSB trending tickers for cross-reference
+    wsb_trending_data = get_combined_trending_tickers(limit=50)
+    wsb_dict = {item['ticker']: item for item in wsb_trending_data}
+    logger.info(f"📊 Got {len(wsb_dict)} WSB trending tickers for reference")
     
-    stock_data = []
+    # Step 2: Get REAL market top movers from Alpha Vantage
+    market_data = fetch_market_top_movers()
     
-    # Fetch data for trending tickers (limit to 20 to avoid API limits)
-    tickers = tickers[:20]
-    
-    for i, ticker in enumerate(tickers):
-        logger.info(f"Fetching {i+1}/{len(tickers)}: {ticker}...")
-        
-        data = fetch_stock_data(ticker)
-        if data:
-            stock_data.append(data)
-            logger.info(f"✓ {ticker}: {data['price_change_pct']:+.2f}%")
-        else:
-            logger.warning(f"✗ Failed to get data for {ticker}")
-        
-        # Alpha Vantage free tier: 5 calls per minute
-        # Add delay to avoid rate limiting
-        if i < len(tickers) - 1:
-            time.sleep(12)  # 60 seconds / 5 calls = 12 seconds per call
-    
-    logger.info(f"Successfully fetched data for {len(stock_data)} trending stocks")
-    
-    if len(stock_data) < top_n * 2:
-        logger.warning(f"Only got {len(stock_data)} stocks, expected at least {top_n * 2}")
-    
-    # Sort by percentage change
-    stock_data.sort(key=lambda x: x['price_change_pct'], reverse=True)
-    
-    # Get top winners and losers
-    winners_data = stock_data[:top_n]
-    losers_data = stock_data[-top_n:][::-1]  # Reverse to show biggest loser first
-    
-    # Save to database
+    # Step 3: Process top gainers
     winners = []
+    for item in market_data.get('top_gainers', [])[:top_n]:
+        try:
+            ticker = item['ticker']
+            
+            # Check if this stock is also trending on WSB
+            is_wsb = ticker in wsb_dict
+            wsb_info = wsb_dict.get(ticker, {})
+            
+            stock_data = {
+                'symbol': ticker,
+                'name': ticker,  # Alpha Vantage doesn't provide name in this endpoint
+                'price': float(item['price']),
+                'price_change': float(item['change_amount']),
+                'price_change_pct': float(item['change_percentage'].replace('%', '')),
+                'volume': int(item['volume']),
+                'date': datetime.now(),
+                'wsb_mentions': wsb_info.get('mentions', 0),
+                'wsb_sentiment': wsb_info.get('sentiment', 'neutral'),
+                'is_wsb_trending': 1 if is_wsb else 0
+            }
+            
+            stock = Stock(**stock_data)
+            db.add(stock)
+            winners.append(stock)
+            
+            wsb_badge = "🔥 WSB TRENDING" if is_wsb else ""
+            logger.info(f"🚀 Winner: {ticker} +{stock_data['price_change_pct']:.2f}% {wsb_badge}")
+            
+        except Exception as e:
+            logger.error(f"Error processing gainer {item}: {e}")
+    
+    # Step 4: Process top losers
     losers = []
-    
-    for data in winners_data:
-        stock = Stock(**data)
-        db.add(stock)
-        winners.append(stock)
-        logger.info(f"🚀 Winner: {data['symbol']} ({data['name']}) +{data['price_change_pct']:.2f}%")
-    
-    for data in losers_data:
-        stock = Stock(**data)
-        db.add(stock)
-        losers.append(stock)
-        logger.info(f"📉 Loser: {data['symbol']} ({data['name']}) {data['price_change_pct']:.2f}%")
+    for item in market_data.get('top_losers', [])[:top_n]:
+        try:
+            ticker = item['ticker']
+            
+            # Check if this stock is also trending on WSB
+            is_wsb = ticker in wsb_dict
+            wsb_info = wsb_dict.get(ticker, {})
+            
+            stock_data = {
+                'symbol': ticker,
+                'name': ticker,
+                'price': float(item['price']),
+                'price_change': float(item['change_amount']),
+                'price_change_pct': float(item['change_percentage'].replace('%', '')),
+                'volume': int(item['volume']),
+                'date': datetime.now(),
+                'wsb_mentions': wsb_info.get('mentions', 0),
+                'wsb_sentiment': wsb_info.get('sentiment', 'neutral'),
+                'is_wsb_trending': 1 if is_wsb else 0
+            }
+            
+            stock = Stock(**stock_data)
+            db.add(stock)
+            losers.append(stock)
+            
+            wsb_badge = "🔥 WSB TRENDING" if is_wsb else ""
+            logger.info(f"📉 Loser: {ticker} {stock_data['price_change_pct']:.2f}% {wsb_badge}")
+            
+        except Exception as e:
+            logger.error(f"Error processing loser {item}: {e}")
     
     db.commit()
     
+    wsb_count = sum(1 for s in winners + losers if s.is_wsb_trending)
     logger.info(f"✅ Saved {len(winners)} winners and {len(losers)} losers to database")
+    logger.info(f"🔥 {wsb_count} of them are ALSO trending on WSB!")
     
     return winners, losers
 

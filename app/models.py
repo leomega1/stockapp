@@ -15,6 +15,12 @@ class Stock(Base):
     price_change = Column(Float)
     price_change_pct = Column(Float)
     volume = Column(Integer)
+    
+    # WSB/Social Media tracking
+    wsb_mentions = Column(Integer, default=0)
+    wsb_sentiment = Column(String, default='neutral')  # bullish/bearish/neutral
+    is_wsb_trending = Column(Integer, default=0)  # 0 or 1 (SQLite doesn't have boolean)
+    
     created_at = Column(DateTime, default=datetime.utcnow)
     
     articles = relationship("Article", back_populates="stock")

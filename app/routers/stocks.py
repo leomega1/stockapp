@@ -21,6 +21,11 @@ class StockResponse(BaseModel):
     price_change_pct: float
     volume: int
     
+    # WSB/Social Media data
+    wsb_mentions: int = 0
+    wsb_sentiment: str = 'neutral'
+    is_wsb_trending: int = 0
+    
     class Config:
         from_attributes = True
 
