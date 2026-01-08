@@ -6,7 +6,8 @@ import logging
 import re
 
 from app.models import Article, Stock
-from app.services.news_service import get_news_summary_for_article
+from app.services.news_service import get_news_summary_for_article, fetch_stock_news
+from app.services.social_aggregator import get_comprehensive_social_context, format_social_context_for_ai
 from app.config import get_settings
 
 logging.basicConfig(level=logging.INFO)
@@ -39,10 +40,12 @@ def generate_article_with_claude(
     price: float,
     volume: int,
     news_summary: str,
+    social_context: str,
     movement_type: str
 ) -> Dict[str, str]:
     """
-    Generate an article explaining stock movement using Claude API
+    Generate a comprehensive article by aggregating news + social media mentions
+    THIS IS THE SECRET SAUCE - AI synthesizes all sources into one article
     
     Args:
         symbol: Stock ticker symbol
@@ -50,7 +53,8 @@ def generate_article_with_claude(
         price_change_pct: Percentage change in price
         price: Current stock price
         volume: Trading volume
-        news_summary: Summary of recent news
+        news_summary: Summary of recent news articles
+        social_context: Aggregated social media mentions (WSB + Twitter/X)
         movement_type: "winner" or "loser"
     
     Returns:
@@ -68,35 +72,45 @@ def generate_article_with_claude(
         direction = "up" if price_change_pct > 0 else "down"
         abs_change = abs(price_change_pct)
         
-        prompt = f"""Write a concise, informative article (250-300 words) explaining why {company_name} ({symbol}) stock moved {direction} by {abs_change:.2f}% today.
+        prompt = f"""You are a financial journalist. Write a comprehensive, engaging article (400-500 words) explaining why {company_name} ({symbol}) stock moved {direction} by {abs_change:.2f}% today.
 
-Current Stock Information:
+📈 CURRENT STOCK DATA:
 - Symbol: {symbol}
 - Company: {company_name}
 - Price Change: {price_change_pct:+.2f}%
 - Current Price: ${price:.2f}
 - Trading Volume: {volume:,}
 
-Recent News Headlines:
+📰 RECENT NEWS ARTICLES:
 {news_summary}
 
-Please write an article that:
-1. Starts with a compelling headline (separate from the article body)
-2. Explains the key factors driving this stock movement
-3. References relevant news or market conditions
-4. Provides context that investors would find useful
-5. Is written in a professional, journalistic style
-6. Is accessible to general investors
+{social_context}
+
+YOUR TASK - THE SECRET SAUCE:
+Synthesize ALL of the above sources (news articles, WSB comments, Twitter mentions) into ONE comprehensive, insightful article that explains:
+
+1. WHY the stock moved today (cite specific news/events)
+2. WHAT traders/investors are saying about it (reference WSB & Twitter sentiment)
+3. KEY FACTORS driving the movement
+4. CONTEXT that helps investors understand the bigger picture
+5. Any notable technical or fundamental developments
+
+WRITING STYLE:
+- Professional yet accessible
+- Reference the social sentiment naturally ("Retail traders on WallStreetBets are...")
+- Cite specific tweets from trusted accounts when relevant
+- Make it engaging and informative
+- Write like a Bloomberg or MarketWatch article
 
 Format your response as:
-HEADLINE: [Your headline here]
+HEADLINE: [Compelling, clickable headline]
 
 ARTICLE:
-[Your article text here]"""
+[Your comprehensive article synthesizing all sources]"""
 
         message = client.messages.create(
             model="claude-3-5-sonnet-20241022",
-            max_tokens=1024,
+            max_tokens=1500,  # Increased for longer comprehensive article
             messages=[
                 {"role": "user", "content": prompt}
             ]
@@ -137,6 +151,7 @@ def generate_fallback_article(
     price: float,
     volume: int,
     news_summary: str,
+    social_context: str,
     movement_type: str
 ) -> Dict[str, str]:
     """
@@ -166,7 +181,8 @@ Traders and investors should monitor upcoming earnings reports, industry trends,
 
 def create_article_for_stock(db: Session, stock: Stock, movement_type: str) -> Article:
     """
-    Create and store an AI-generated article for a stock
+    Create and store a COMPREHENSIVE AI-generated article for a stock
+    **THE SECRET SAUCE**: Aggregates news + WSB + Twitter/X mentions into one article
     
     Args:
         db: Database session
@@ -176,12 +192,24 @@ def create_article_for_stock(db: Session, stock: Stock, movement_type: str) -> A
     Returns:
         Article object
     """
-    logger.info(f"Generating article for {stock.symbol} ({movement_type})")
+    logger.info(f"🔥 Generating COMPREHENSIVE article for {stock.symbol} ({movement_type})")
     
-    # Get news summary
+    # Step 1: Fetch news articles
+    logger.info(f"  📰 Fetching news for {stock.symbol}...")
+    try:
+        fetch_stock_news(db, stock.symbol, stock.name)
+    except Exception as e:
+        logger.warning(f"  Could not fetch news: {e}")
+    
     news_summary = get_news_summary_for_article(db, stock.symbol)
     
-    # Generate article using Claude
+    # Step 2: Get social media context (WSB + Twitter/X)
+    logger.info(f"  🔥 Aggregating social media mentions...")
+    social_data = get_comprehensive_social_context(stock.symbol)
+    social_context = format_social_context_for_ai(social_data)
+    
+    # Step 3: Generate comprehensive article using Claude (synthesizes everything)
+    logger.info(f"  🤖 Generating AI article with Claude...")
     article_data = generate_article_with_claude(
         symbol=stock.symbol,
         company_name=stock.name,
@@ -189,6 +217,7 @@ def create_article_for_stock(db: Session, stock: Stock, movement_type: str) -> A
         price=stock.price,
         volume=stock.volume,
         news_summary=news_summary,
+        social_context=social_context,
         movement_type=movement_type
     )
     
