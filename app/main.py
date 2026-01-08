@@ -12,10 +12,10 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS middleware
+# CORS middleware - Allow all origins for deployment
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001"],
+    allow_origins=["*"],  # Allow all origins (Vercel frontend + localhost)
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -31,10 +31,11 @@ async def startup_event():
     """Initialize database on startup"""
     init_db()
     
-    # Start scheduler if enabled
-    if settings.scheduler_enabled:
-        from app.services.scheduler import start_scheduler
-        start_scheduler()
+    # Disable scheduler on startup to avoid boot timeout
+    # Use the /api/stocks/fetch-movers endpoint to manually trigger data fetching
+    # if settings.scheduler_enabled:
+    #     from app.services.scheduler import start_scheduler
+    #     start_scheduler()
 
 
 @app.get("/")
